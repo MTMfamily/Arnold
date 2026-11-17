@@ -67,9 +67,10 @@ function initiales(nom) {
   return e(String(nom || "?").split(" ").map((m) => m[0]).slice(0, 2).join("").toUpperCase());
 }
 
+// La valeur enregistrée reste en français ; seul le texte affiché est traduit.
 function options(liste, choisi, vide) {
-  const premier = vide ? `<option value="">${e(vide)}</option>` : "";
-  return premier + liste.map((v) => `<option ${v === choisi ? "selected" : ""}>${e(v)}</option>`).join("");
+  const premier = vide ? `<option value="">${e(t(vide))}</option>` : "";
+  return premier + liste.map((v) => `<option value="${e(v)}" ${v === choisi ? "selected" : ""}>${e(t(v))}</option>`).join("");
 }
 
 function tags(texte, classe = "") {
@@ -83,9 +84,9 @@ function tags(texte, classe = "") {
 
 function depuis(date) {
   const jours = Math.floor((Date.now() - new Date(date.replace(" ", "T") + "Z")) / 86400000);
-  if (jours <= 0) return "aujourd'hui";
-  if (jours === 1) return "hier";
-  return `il y a ${jours} jours`;
+  if (jours <= 0) return t("aujourd'hui");
+  if (jours === 1) return t("hier");
+  return t("il y a {n} jours", { n: jours });
 }
 
 // Âge en années à partir d'une date "AAAA-MM-JJ" ; null si la date est invalide.
@@ -114,11 +115,12 @@ function dateFr(date) {
 }
 
 function toast(message) {
-  const t = document.getElementById("toast");
-  t.textContent = message;
-  t.classList.add("visible");
+  const boite = document.getElementById("toast");
+  // Les messages sont écrits en français dans le code et traduits ici automatiquement.
+  boite.textContent = traduireMessage(message);
+  boite.classList.add("visible");
   clearTimeout(toast.minuteur);
-  toast.minuteur = setTimeout(() => t.classList.remove("visible"), 2600);
+  toast.minuteur = setTimeout(() => boite.classList.remove("visible"), 2600);
 }
 
 function aller(route) {
@@ -128,7 +130,7 @@ function aller(route) {
 
 // Marque un champ obligatoire (le code vérifie aussi ces champs à l'envoi).
 const OBL = ' <span class="obligatoire" aria-hidden="true">*</span>';
-const NOTE_OBL = '<p class="sous"><span class="obligatoire">*</span> Champ obligatoire</p>';
+const noteObl = () => `<p class="sous"><span class="obligatoire">*</span> ${t("Champ obligatoire")}</p>`;
 
 function donneesForm(form) {
   return Object.fromEntries(new FormData(form).entries());
@@ -239,7 +241,7 @@ function deconnecter() {
 
 function majNav() {
   const moi = utilisateur();
-  let lienEspace = '<a href="#/espace">Mon espace</a>';
+  let lienEspace = `<a href="#/espace">${t("Mon espace")}</a>`;
   if (estAdmin(moi)) {
     const n = DB.un("SELECT COUNT(*) AS n FROM users WHERE role = ? AND statut_compte = 'en_attente'", [ADMINS[moi.role].cible]).n;
     lienEspace = `<a href="#/espace">Administration${n ? ` <span class="pastille">${n}</span>` : ""}</a>`;
@@ -248,10 +250,109 @@ function majNav() {
   }
   document.getElementById("navUser").innerHTML = moi
     ? `${lienEspace}
-       <button class="btn btn-petit btn-blanc" data-action="deconnexion">Déconnexion</button>`
-    : `<a href="#/connexion">Connexion</a>
-       <a href="#/inscription" class="btn btn-petit btn-rouge">S'inscrire</a>`;
+       <button class="btn btn-petit btn-blanc" data-action="deconnexion">${t("Déconnexion")}</button>`
+    : `<a href="#/connexion">${t("Connexion")}</a>
+       <a href="#/inscription" class="btn btn-petit btn-rouge">${t("S'inscrire")}</a>`;
 }
+
+// ---------- Langue et mode léger ----------
+
+// Mode léger : moins d'effets visuels et des listes plus courtes, pour économiser les données mobiles.
+// Activé automatiquement si le téléphone est en mode « économie de données ».
+function lireModeLeger() {
+  const pref = lirePreferences().leger;
+  if (typeof pref === "boolean") return pref;
+  return !!(navigator.connection && navigator.connection.saveData);
+}
+
+let modeLeger = lireModeLeger();
+
+function appliquerReglages() {
+  document.documentElement.lang = langue;
+  document.documentElement.classList.toggle("leger", modeLeger);
+  const bouton = document.getElementById("boutonLeger");
+  bouton.setAttribute("aria-pressed", String(modeLeger));
+  bouton.title = t("Mode léger");
+  bouton.setAttribute("aria-label", t("Mode léger"));
+  const choix = document.getElementById("choixLangue");
+  choix.setAttribute("aria-label", t("Langue"));
+  choix.innerHTML = Object.entries(LANGUES)
+    .map(([code, nom]) => `<option value="${code}" ${code === langue ? "selected" : ""}>${e(nom)}</option>`).join("");
+  document.getElementById("lienOffres").textContent = t("Offres");
+  document.getElementById("lienTalents").textContent = t("Talents");
+  document.getElementById("piedSlogan").textContent = t("« le travail » en lingala · Le réseau pro de la RDC");
+  document.getElementById("piedProjet").textContent = t("Projet d'Arnold · Code en Famille");
+  const bandeau = document.getElementById("bandeauLangue");
+  bandeau.hidden = langue === "fr";
+  bandeau.textContent = langue === "fr" ? "" : t("🗣️ Traduction en cours de vérification : aide-nous à la corriger !");
+  afficherCompteur();
+}
+
+// Nombre d'éléments affichés dans une liste ; le bouton « Voir plus » en ajoute d'autres.
+function taillePage() {
+  return modeLeger ? 6 : 24;
+}
+
+function combienAfficher(params) {
+  const n = Number.parseInt(params.get("n"), 10);
+  return Number.isInteger(n) && n > 0 ? Math.min(n, 1000) : taillePage();
+}
+
+function boutonVoirPlus(total, nombre, params) {
+  if (total <= nombre) return "";
+  const suite = new URLSearchParams(params);
+  suite.set("n", String(nombre + taillePage()));
+  const chemin = location.hash.split("?")[0] || "#/";
+  return `<p style="text-align:center;margin-top:16px"><a class="btn btn-blanc" href="${e(chemin + "?" + suite)}">${t("Voir plus")} (${total - nombre})</a></p>`;
+}
+
+// Compteur de données : ce que cette visite a vraiment téléchargé (0 Ko pour ce qui vient de la mémoire du téléphone).
+function donneesUtilisees() {
+  if (!window.performance || !performance.getEntriesByType) return null;
+  const entrees = [...performance.getEntriesByType("navigation"), ...performance.getEntriesByType("resource")];
+  return Math.round(entrees.reduce((total, x) => total + (x.transferSize || 0), 0) / 1024);
+}
+
+function afficherCompteur() {
+  const zone = document.getElementById("compteurDonnees");
+  const ko = donneesUtilisees();
+  zone.hidden = !modeLeger || ko === null;
+  if (!zone.hidden) zone.textContent = t("📶 Mode léger activé · Cette visite a utilisé {ko} Ko d'Internet.", { ko });
+}
+
+// Garde Musala dans le téléphone (service worker) : les visites suivantes ne retéléchargent presque rien,
+// et le site s'ouvre même sans Internet.
+function enregistrerHorsLigne() {
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+  const premiereFois = !navigator.serviceWorker.controller;
+  navigator.serviceWorker.register("sw.js")
+    .then((inscription) => {
+      if (!premiereFois) return;
+      const travailleur = inscription.installing || inscription.waiting;
+      if (!travailleur) return;
+      travailleur.addEventListener("statechange", () => {
+        if (travailleur.state === "activated") toast("Musala est enregistré sur ton appareil : il marche même sans Internet.");
+      });
+    })
+    .catch((err) => console.warn("Mode hors ligne indisponible", err));
+}
+
+window.addEventListener("offline", () => toast("Tu n'es pas connecté à Internet : tu vois la dernière version enregistrée."));
+window.addEventListener("load", () => setTimeout(afficherCompteur, 500));
+
+document.getElementById("choixLangue").addEventListener("change", (ev) => {
+  changerLangue(ev.target.value);
+  appliquerReglages();
+  afficher();
+});
+
+document.getElementById("boutonLeger").addEventListener("click", () => {
+  modeLeger = !modeLeger;
+  ecrirePreferences({ leger: modeLeger });
+  appliquerReglages();
+  afficher();
+  toast(modeLeger ? "Mode léger activé 📶" : "Mode léger désactivé");
+});
 
 // ---------- Cartes réutilisables ----------
 
@@ -261,24 +362,24 @@ function carteOffre(o) {
       <h3>${e(o.titre)}</h3>
       <p class="sous">${e(o.entreprise)} · ${e(o.ville)}</p>
       <div class="tags">
-        <span class="tag tag-rouge">${e(o.type_contrat)}</span>
-        <span class="tag">${e(o.secteur)}</span>
+        <span class="tag tag-rouge">${e(t(o.type_contrat))}</span>
+        <span class="tag">${e(t(o.secteur))}</span>
       </div>
       <small>${o.salaire ? "💰 " + e(o.salaire) + " · " : ""}${depuis(o.cree_le)}</small>
     </a>`;
 }
 
-function carteTalent(t) {
+function carteTalent(p) {
   return `
-    <a class="carte carte-lien" href="#/talent/${t.id}">
+    <a class="carte carte-lien" href="#/talent/${p.id}">
       <div class="ligne">
-        <div class="avatar">${initiales(t.nom)}</div>
+        <div class="avatar">${initiales(p.nom)}</div>
         <div>
-          <h3>${e(t.nom)} <span class="verifie" title="Profil vérifié par Musala">✔</span></h3>
-          <p class="sous" style="margin:0">${e(t.titre || "Membre Musala")} · ${e(t.ville)}</p>
+          <h3>${e(p.nom)} <span class="verifie" title="${e(t("✔ Vérifié"))}">✔</span></h3>
+          <p class="sous" style="margin:0">${e(p.titre || t("Membre Musala"))} · ${e(p.ville)}</p>
         </div>
       </div>
-      <div class="tags">${tags(t.competences)}</div>
+      <div class="tags">${tags(p.competences)}</div>
     </a>`;
 }
 
@@ -304,28 +405,28 @@ const pages = {
     const recentes = DB.tous(REQ_OFFRES + " ORDER BY o.cree_le DESC, o.id DESC LIMIT 3");
     return `
       <section class="hero">
-        <h1>Ton talent mérite d'être vu. 🇨🇩</h1>
-        <p>Musala connecte les demandeurs d'emploi et les employeurs de toute la RDC, de Kinshasa à Lubumbashi, de Goma à Matadi.</p>
+        <h1>${t("Ton talent mérite d'être vu.")} 🇨🇩</h1>
+        <p>${t("Musala connecte les demandeurs d'emploi et les employeurs de toute la RDC, de Kinshasa à Lubumbashi, de Goma à Matadi.")}</p>
         <form class="recherche" data-form="recherche">
-          <input name="q" placeholder="Métier, compétence…">
+          <input name="q" placeholder="${e(t("Métier, compétence…"))}">
           <select name="ville">${options(VILLES, "", "Toutes les villes")}</select>
-          <button class="btn btn-rouge">Chercher</button>
+          <button class="btn btn-rouge">${t("Chercher")}</button>
         </form>
         <div class="hero-actions">
-          <a href="#/inscription?role=demandeur" class="btn btn-blanc">Je cherche un emploi</a>
-          <a href="#/inscription?role=employeur" class="btn btn-rouge">Je recrute</a>
+          <a href="#/inscription?role=demandeur" class="btn btn-blanc">${t("Je cherche un emploi")}</a>
+          <a href="#/inscription?role=employeur" class="btn btn-rouge">${t("Je recrute")}</a>
         </div>
       </section>
 
       <section class="stats">
-        <div class="stat"><b>${nbOffres}</b><span>offres d'emploi</span></div>
-        <div class="stat"><b>${nbTalents}</b><span>talents vérifiés</span></div>
-        <div class="stat"><b>${nbEntreprises}</b><span>employeurs vérifiés</span></div>
+        <div class="stat"><b>${nbOffres}</b><span>${t("offres d'emploi")}</span></div>
+        <div class="stat"><b>${nbTalents}</b><span>${t("talents vérifiés")}</span></div>
+        <div class="stat"><b>${nbEntreprises}</b><span>${t("employeurs vérifiés")}</span></div>
       </section>
 
-      <h2 class="section">Offres récentes</h2>
-      <div class="grille">${recentes.map(carteOffre).join("") || '<p class="vide">Aucune offre pour le moment.</p>'}</div>
-      <p style="text-align:center;margin-top:20px"><a href="#/offres" class="btn">Voir toutes les offres</a></p>`;
+      <h2 class="section">${t("Offres récentes")}</h2>
+      <div class="grille">${recentes.map(carteOffre).join("") || `<p class="vide">${t("Aucune offre pour le moment.")}</p>`}</div>
+      <p style="text-align:center;margin-top:20px"><a href="#/offres" class="btn">${t("Voir toutes les offres")}</a></p>`;
   },
 
   offres(params) {
@@ -343,16 +444,18 @@ const pages = {
     if (secteur) { req += " AND o.secteur = ?"; p.push(secteur); }
     if (contrat) { req += " AND o.type_contrat = ?"; p.push(contrat); }
     const liste = DB.tous(req + " ORDER BY o.cree_le DESC, o.id DESC", p);
+    const nombre = combienAfficher(params);
     return `
-      <div class="page-titre"><h1>Offres d'emploi</h1><span class="sous">${liste.length} résultat(s)</span></div>
+      <div class="page-titre"><h1>${t("Offres d'emploi")}</h1><span class="sous">${t("{n} résultat(s)", { n: liste.length })}</span></div>
       <form class="filtres" data-form="filtres">
-        <input name="q" placeholder="Métier, compétence, entreprise…" value="${e(q)}">
+        <input name="q" placeholder="${e(t("Métier, compétence, entreprise…"))}" value="${e(q)}">
         <select name="ville">${options(VILLES, ville, "Toutes les villes")}</select>
         <select name="secteur">${options(SECTEURS, secteur, "Tous les secteurs")}</select>
         <select name="contrat">${options(CONTRATS, contrat, "Tous les contrats")}</select>
-        <button class="btn">Filtrer</button>
+        <button class="btn">${t("Filtrer")}</button>
       </form>
-      <div class="grille">${liste.map(carteOffre).join("") || '<p class="vide">Aucune offre ne correspond. Essaie d\'autres filtres !</p>'}</div>`;
+      <div class="grille">${liste.slice(0, nombre).map(carteOffre).join("") || `<p class="vide">${t("Aucune offre ne correspond. Essaie d'autres filtres !")}</p>`}</div>
+      ${boutonVoirPlus(liste.length, nombre, params)}`;
   },
 
   offre(params, id) {
@@ -363,41 +466,41 @@ const pages = {
     // L'offre d'un employeur non validé (ou suspendu) reste cachée, sauf pour lui et l'admin des employeurs.
     const visible = o.statut_compte === "valide" || (moi && (moi.id === o.employeur_id || moi.role === "admin_employeurs"));
     if (!visible) return pages.introuvable();
-    let action = `<a class="btn btn-rouge" href="#/connexion?retour=${encodeURIComponent("#/offre/" + o.id)}">Se connecter pour postuler</a>`;
+    let action = `<a class="btn btn-rouge" href="#/connexion?retour=${encodeURIComponent("#/offre/" + o.id)}">${t("Se connecter pour postuler")}</a>`;
     if (o.statut_compte !== "valide") {
-      action = `<p class="sous">🔒 Cette offre n'est pas visible du public : le compte de l'employeur n'est pas validé.</p>`;
+      action = `<p class="sous">${t("🔒 Cette offre n'est pas visible du public : le compte de l'employeur n'est pas validé.")}</p>`;
     } else if (estAdmin(moi)) {
-      action = `<p class="sous">Tu es connecté en administrateur.</p>`;
+      action = `<p class="sous">${t("Tu es connecté en administrateur.")}</p>`;
     } else if (moi && moi.role === "employeur") {
       action = moi.id === o.employeur_id
-        ? `<a class="btn" href="#/espace/candidats/${o.id}">Voir les candidats</a>`
-        : `<p class="sous">Connecte-toi avec un compte demandeur pour postuler.</p>`;
+        ? `<a class="btn" href="#/espace/candidats/${o.id}">${t("Voir les candidats")}</a>`
+        : `<p class="sous">${t("Connecte-toi avec un compte demandeur pour postuler.")}</p>`;
     } else if (moi && moi.statut_compte !== "valide") {
-      action = `<p>🔒 Ton dossier doit être validé par un administrateur avant de pouvoir postuler. <a href="#/espace">Voir mon dossier</a></p>`;
+      action = `<p>${t("🔒 Ton dossier doit être validé par un administrateur avant de pouvoir postuler.")} <a href="#/espace">${t("Voir mon dossier")}</a></p>`;
     } else if (moi) {
       const deja = DB.un("SELECT statut FROM candidatures WHERE offre_id = ? AND demandeur_id = ?", [o.id, moi.id]);
       action = deja
-        ? `<p>✅ Tu as déjà postulé. Statut : <span class="statut statut-${e(deja.statut)}">${e(STATUTS[deja.statut])}</span></p>`
+        ? `<p>${t("✅ Tu as déjà postulé. Statut :")} <span class="statut statut-${e(deja.statut)}">${e(t(STATUTS[deja.statut]))}</span></p>`
         : `<form data-form="postuler" data-offre="${o.id}">
-             <label for="message">Ton message à l'employeur</label>
-             <textarea id="message" name="message" placeholder="Présente-toi en quelques lignes et dis pourquoi ce poste t'intéresse." required></textarea>
-             <button class="btn btn-rouge" style="margin-top:12px">Postuler</button>
+             <label for="message">${t("Ton message à l'employeur")}</label>
+             <textarea id="message" name="message" placeholder="${e(t("Présente-toi en quelques lignes et dis pourquoi ce poste t'intéresse."))}" required></textarea>
+             <button class="btn btn-rouge" style="margin-top:12px">${t("Postuler")}</button>
            </form>`;
     }
     return `
       <div class="detail carte">
-        <a href="#/offres">← Toutes les offres</a>
+        <a href="#/offres">${t("← Toutes les offres")}</a>
         <h1>${e(o.titre)}</h1>
-        <p class="sous">${e(o.entreprise)}${o.statut_compte === "valide" ? ' <span class="verifie" title="Employeur vérifié par Musala">✔ Vérifié</span>' : ""} · ${e(o.ville)} · publiée ${depuis(o.cree_le)}</p>
+        <p class="sous">${e(o.entreprise)}${o.statut_compte === "valide" ? ` <span class="verifie">${t("✔ Vérifié")}</span>` : ""} · ${e(o.ville)} · ${t("publiée {quand}", { quand: depuis(o.cree_le) })}</p>
         <div class="tags">
-          <span class="tag tag-rouge">${e(o.type_contrat)}</span>
-          <span class="tag">${e(o.secteur)}</span>
+          <span class="tag tag-rouge">${e(t(o.type_contrat))}</span>
+          <span class="tag">${e(t(o.secteur))}</span>
           ${o.salaire ? `<span class="tag">💰 ${e(o.salaire)}</span>` : ""}
         </div>
-        <h3>Le poste</h3>
+        <h3>${t("Le poste")}</h3>
         <p class="description">${e(o.description)}</p>
-        ${o.competences ? `<h3>Compétences recherchées</h3><div class="tags">${tags(o.competences)}</div>` : ""}
-        ${o.desc_entreprise ? `<h3>À propos de ${e(o.entreprise)}</h3><p>${e(o.desc_entreprise)}</p>` : ""}
+        ${o.competences ? `<h3>${t("Compétences recherchées")}</h3><div class="tags">${tags(o.competences)}</div>` : ""}
+        ${o.desc_entreprise ? `<h3>${e(t("À propos de {nom}", { nom: o.entreprise }))}</h3><p>${e(o.desc_entreprise)}</p>` : ""}
         <hr style="border:0;border-top:1px solid var(--bord);margin:24px 0">
         ${action}
       </div>`;
@@ -414,45 +517,47 @@ const pages = {
     }
     if (ville) { req += " AND u.ville = ?"; p.push(ville); }
     const liste = DB.tous(req + " ORDER BY u.id DESC", p);
+    const nombre = combienAfficher(params);
     return `
-      <div class="page-titre"><h1>Talents</h1><span class="sous">${liste.length} profil(s) vérifié(s)</span></div>
+      <div class="page-titre"><h1>${t("Talents")}</h1><span class="sous">${t("{n} profil(s) vérifié(s)", { n: liste.length })}</span></div>
       <form class="filtres" data-form="filtres-talents">
-        <input name="q" placeholder="Nom, métier, compétence…" value="${e(q)}">
+        <input name="q" placeholder="${e(t("Nom, métier, compétence…"))}" value="${e(q)}">
         <select name="ville">${options(VILLES, ville, "Toutes les villes")}</select>
-        <button class="btn">Filtrer</button>
+        <button class="btn">${t("Filtrer")}</button>
       </form>
-      <div class="grille">${liste.map(carteTalent).join("") || '<p class="vide">Aucun talent trouvé.</p>'}</div>`;
+      <div class="grille">${liste.slice(0, nombre).map(carteTalent).join("") || `<p class="vide">${t("Aucun talent trouvé.")}</p>`}</div>
+      ${boutonVoirPlus(liste.length, nombre, params)}`;
   },
 
   talent(params, id) {
-    const t = DB.un(`SELECT u.*, p.* FROM users u JOIN profils p ON p.user_id = u.id
+    const p = DB.un(`SELECT u.*, p.* FROM users u JOIN profils p ON p.user_id = u.id
       WHERE u.id = ? AND u.role = 'demandeur'`, [Number(id)]);
-    if (!t) return pages.introuvable();
+    if (!p) return pages.introuvable();
     const moi = utilisateur();
     // Un profil non validé n'est visible que par son propriétaire et l'admin des demandeurs.
-    const visible = t.statut_compte === "valide" || (moi && (moi.id === t.id || moi.role === "admin_demandeurs"));
+    const visible = p.statut_compte === "valide" || (moi && (moi.id === p.id || moi.role === "admin_demandeurs"));
     if (!visible) return pages.introuvable();
-    const voitContact = estValide(moi, "employeur") || (moi && (moi.id === t.id || moi.role === "admin_demandeurs"));
+    const voitContact = estValide(moi, "employeur") || (moi && (moi.id === p.id || moi.role === "admin_demandeurs"));
     const contact = voitContact
-      ? `<p>📧 <a href="mailto:${e(t.email)}">${e(t.email)}</a>${t.telephone ? ` · 📞 ${e(t.telephone)}` : ""}</p>`
-      : `<p class="sous">Les coordonnées sont visibles uniquement par les employeurs vérifiés.</p>`;
+      ? `<p>📧 <a href="mailto:${e(p.email)}">${e(p.email)}</a>${p.telephone ? ` · 📞 ${e(p.telephone)}` : ""}</p>`
+      : `<p class="sous">${t("Les coordonnées sont visibles uniquement par les employeurs vérifiés.")}</p>`;
     return `
       <div class="detail carte">
-        <a href="#/talents">← Tous les talents</a>
-        ${t.statut_compte !== "valide" ? `<div class="bandeau bandeau-en_attente">🔒 Ce profil n'est pas encore visible du public (${e(STATUTS_COMPTE[t.statut_compte].toLowerCase())}).</div>` : ""}
+        <a href="#/talents">${t("← Tous les talents")}</a>
+        ${p.statut_compte !== "valide" ? `<div class="bandeau bandeau-en_attente">${t("🔒 Ce profil n'est pas encore visible du public.")} (${e(t(STATUTS_COMPTE[p.statut_compte]))})</div>` : ""}
         <div class="ligne" style="margin-top:16px">
-          <div class="avatar avatar-grand">${initiales(t.nom)}</div>
+          <div class="avatar avatar-grand">${initiales(p.nom)}</div>
           <div>
-            <h1 style="margin:0">${e(t.nom)}${t.statut_compte === "valide" ? ' <span class="verifie" title="Profil vérifié par Musala">✔ Vérifié</span>' : ""}</h1>
-            <p class="sous" style="margin:0">${e(t.titre || "Membre Musala")} · ${e(t.ville)}</p>
-            ${t.disponible ? '<span class="tag">🟢 Disponible</span>' : ""}
+            <h1 style="margin:0">${e(p.nom)}${p.statut_compte === "valide" ? ` <span class="verifie">${t("✔ Vérifié")}</span>` : ""}</h1>
+            <p class="sous" style="margin:0">${e(p.titre || t("Membre Musala"))} · ${e(p.ville)}</p>
+            ${p.disponible ? `<span class="tag">${t("🟢 Disponible")}</span>` : ""}
           </div>
         </div>
-        ${t.bio ? `<h3>À propos</h3><p class="description">${e(t.bio)}</p>` : ""}
-        ${t.competences ? `<h3>Compétences</h3><div class="tags">${tags(t.competences)}</div>` : ""}
-        ${t.experience ? `<h3>Expérience</h3><p class="description">${e(t.experience)}</p>` : ""}
-        ${t.niveau_etudes ? `<h3>Études</h3><p>${e(t.niveau_etudes)}</p>` : ""}
-        <h3>Contact</h3>${contact}
+        ${p.bio ? `<h3>${t("À propos")}</h3><p class="description">${e(p.bio)}</p>` : ""}
+        ${p.competences ? `<h3>${t("Compétences")}</h3><div class="tags">${tags(p.competences)}</div>` : ""}
+        ${p.experience ? `<h3>${t("Expérience")}</h3><p class="description">${e(p.experience)}</p>` : ""}
+        ${p.niveau_etudes ? `<h3>${t("Études")}</h3><p>${e(t(p.niveau_etudes))}</p>` : ""}
+        <h3>${t("Contact")}</h3>${contact}
       </div>`;
   },
 
@@ -460,17 +565,17 @@ const pages = {
     const retour = params.get("retour") || "#/espace";
     return `
       <form class="form carte" data-form="connexion" data-retour="${e(retour)}">
-        <h1>Connexion</h1>
-        <label for="email">E-mail</label>
+        <h1>${t("Connexion")}</h1>
+        <label for="email">${t("E-mail")}</label>
         <input id="email" name="email" type="email" required autocomplete="email">
-        <label for="mdp">Mot de passe</label>
+        <label for="mdp">${t("Mot de passe")}</label>
         <input id="mdp" name="mdp" type="password" required autocomplete="current-password">
-        <button class="btn">Se connecter</button>
-        <p style="text-align:center">Pas encore de compte ? <a href="#/inscription">Inscris-toi</a></p>
+        <button class="btn">${t("Se connecter")}</button>
+        <p style="text-align:center">${t("Pas encore de compte ?")} <a href="#/inscription">${t("Inscris-toi")}</a></p>
         <div class="astuce">💡 Comptes de test (mot de passe <b>musala123</b>) : <b>grace@exemple.cd</b> (demandeuse validée), <b>merveille@exemple.cd</b> (demandeuse en attente), <b>contact@kindigital.cd</b> (employeur validé), <b>rh@congobatiment.cd</b> (employeur en attente).
           <br>Administrateurs : <b>admin.employeurs@musala.cd</b> / <b>admin-employeurs</b> et <b>admin.demandeurs@musala.cd</b> / <b>admin-demandeurs</b>.
           <br>Super admin : <b>superadmin@musala.cd</b> / <b>super-musala</b>.</div>
-        <div class="astuce">🔒 Sur un ordinateur partagé (cybercafé, école), pense à cliquer sur <b>Déconnexion</b> en partant. Par sécurité, Musala te déconnecte aussi après 30 minutes sans activité.</div>
+        <div class="astuce">${t("🔒 Sur un ordinateur partagé (cybercafé, école), pense à cliquer sur Déconnexion en partant. Par sécurité, Musala te déconnecte aussi après 30 minutes sans activité.")}</div>
       </form>`;
   },
 
@@ -481,44 +586,44 @@ const pages = {
     return `
       <form class="form carte" data-form="inscription">
         ${etapes(3)}
-        <h1>Rejoins Musala</h1>
-        ${NOTE_OBL}
-        <label>Je suis…</label>
+        <h1>${t("Rejoins Musala")}</h1>
+        ${noteObl()}
+        <label>${t("Je suis…")}</label>
         <div class="choix-role">
-          <label><input type="radio" name="role" value="demandeur" ${role === "demandeur" ? "checked" : ""}><span>👤 Demandeur d'emploi</span><small>Je cherche un travail</small></label>
-          <label><input type="radio" name="role" value="employeur" ${role === "employeur" ? "checked" : ""}><span>🏢 Employeur</span><small>Je recrute</small></label>
+          <label><input type="radio" name="role" value="demandeur" ${role === "demandeur" ? "checked" : ""}><span>${t("👤 Demandeur d'emploi")}</span><small>${t("Je cherche un travail")}</small></label>
+          <label><input type="radio" name="role" value="employeur" ${role === "employeur" ? "checked" : ""}><span>${t("🏢 Employeur")}</span><small>${t("Je recrute")}</small></label>
         </div>
-        <label for="nom">Nom complet (comme sur ta pièce d'identité) ou nom de l'entreprise${OBL}</label>
+        <label for="nom">${t("Nom complet (comme sur ta pièce d'identité) ou nom de l'entreprise")}${OBL}</label>
         <input id="nom" name="nom" required maxlength="100">
         <div class="deux-col">
           <div>
-            <label for="ville">Ville${OBL}</label>
+            <label for="ville">${t("Ville")}${OBL}</label>
             <select id="ville" name="ville" required>${options(VILLES, "Kinshasa")}</select>
           </div>
           <div>
-            <label for="telephone">Téléphone${OBL}</label>
+            <label for="telephone">${t("Téléphone")}${OBL}</label>
             <input id="telephone" name="telephone" placeholder="+243…" required>
           </div>
         </div>
-        <label for="email">E-mail <span class="verifie">✔ vérifié</span></label>
+        <label for="email">${t("E-mail")} <span class="verifie">${t("✔ vérifié")}</span></label>
         <input id="email" name="email" type="email" value="${e(OTP.verifie.email)}" readonly>
-        <p class="sous" style="margin:4px 0 0"><a href="#/inscription" data-action="otp-recommencer">Utiliser une autre adresse</a></p>
-        <label for="mdp">Mot de passe (8 caractères minimum)${OBL}</label>
+        <p class="sous" style="margin:4px 0 0"><a href="#/inscription" data-action="otp-recommencer">${t("Utiliser une autre adresse")}</a></p>
+        <label for="mdp">${t("Mot de passe (8 caractères minimum)")}${OBL}</label>
         <input id="mdp" name="mdp" type="password" minlength="8" required autocomplete="new-password">
 
         <fieldset class="bloc-role" id="champsDemandeur" ${role === "demandeur" ? "" : "hidden disabled"}>
-          <h3>👤 Dossier de vérification</h3>
+          <h3>${t("👤 Dossier de vérification")}</h3>
           ${blocCriteres("demandeur")}
           ${champsDemandeur({}, "d-")}
         </fieldset>
         <fieldset class="bloc-role" id="champsEmployeur" ${role === "employeur" ? "" : "hidden disabled"}>
-          <h3>🏢 Dossier de vérification</h3>
+          <h3>${t("🏢 Dossier de vérification")}</h3>
           ${blocCriteres("employeur")}
           ${champsEmployeur({}, "e-")}
         </fieldset>
 
-        <button class="btn btn-rouge">Créer mon compte et envoyer mon dossier</button>
-        <p style="text-align:center">Déjà inscrit ? <a href="#/connexion">Connecte-toi</a></p>
+        <button class="btn btn-rouge">${t("Créer mon compte et envoyer mon dossier")}</button>
+        <p style="text-align:center">${t("Déjà inscrit ?")} <a href="#/connexion">${t("Connecte-toi")}</a></p>
       </form>`;
   },
 
@@ -538,16 +643,16 @@ const pages = {
       <form class="form carte" data-form="mot-de-passe">
         ${moi.doit_changer_mdp
           ? `<div class="bandeau bandeau-en_attente">🔑 <b>Bienvenue ${e(moi.nom)} !</b> Ton compte a été créé avec un mot de passe temporaire. Choisis ton propre mot de passe pour continuer.</div>`
-          : '<a href="#/espace">← Mon espace</a>'}
-        <h1>Changer mon mot de passe</h1>
-        ${NOTE_OBL}
-        <label for="actuel">Mot de passe actuel${moi.doit_changer_mdp ? " (temporaire)" : ""}${OBL}</label>
+          : `<a href="#/espace">${t("← Mon espace")}</a>`}
+        <h1>${t("Changer mon mot de passe")}</h1>
+        ${noteObl()}
+        <label for="actuel">${t("Mot de passe actuel")}${moi.doit_changer_mdp ? " (temporaire)" : ""}${OBL}</label>
         <input id="actuel" name="actuel" type="password" required autocomplete="current-password">
-        <label for="nouveau">Nouveau mot de passe (${minimum} caractères minimum)${OBL}</label>
+        <label for="nouveau">${t("Nouveau mot de passe ({minimum} caractères minimum)", { minimum })}${OBL}</label>
         <input id="nouveau" name="nouveau" type="password" minlength="${minimum}" required autocomplete="new-password">
-        <label for="confirmation">Confirme le nouveau mot de passe${OBL}</label>
+        <label for="confirmation">${t("Confirme le nouveau mot de passe")}${OBL}</label>
         <input id="confirmation" name="confirmation" type="password" minlength="${minimum}" required autocomplete="new-password">
-        <button class="btn btn-rouge">Enregistrer</button>
+        <button class="btn btn-rouge">${t("Enregistrer")}</button>
       </form>`;
   },
 
@@ -556,21 +661,21 @@ const pages = {
     if (!moi) return "";
     return `
       <form class="form carte" data-form="offre">
-        <a href="#/espace">← Mon espace</a>
-        <h1>Publier une offre</h1>
-        <label for="titre">Intitulé du poste</label>
+        <a href="#/espace">${t("← Mon espace")}</a>
+        <h1>${t("Publier une offre")}</h1>
+        <label for="titre">${t("Intitulé du poste")}</label>
         <input id="titre" name="titre" required placeholder="Ex : Développeur web junior">
         <div class="deux-col">
-          <div><label for="secteur">Secteur</label><select id="secteur" name="secteur">${options(SECTEURS, "")}</select></div>
-          <div><label for="ville">Ville</label><select id="ville" name="ville">${options(VILLES, moi.ville)}</select></div>
-          <div><label for="type_contrat">Contrat</label><select id="type_contrat" name="type_contrat">${options(CONTRATS, "CDI")}</select></div>
-          <div><label for="salaire">Salaire (facultatif)</label><input id="salaire" name="salaire" placeholder="Ex : 600 $ / mois"></div>
+          <div><label for="secteur">${t("Secteur")}</label><select id="secteur" name="secteur">${options(SECTEURS, "")}</select></div>
+          <div><label for="ville">${t("Ville")}</label><select id="ville" name="ville">${options(VILLES, moi.ville)}</select></div>
+          <div><label for="type_contrat">${t("Contrat")}</label><select id="type_contrat" name="type_contrat">${options(CONTRATS, "CDI")}</select></div>
+          <div><label for="salaire">${t("Salaire (facultatif)")}</label><input id="salaire" name="salaire" placeholder="Ex : 600 $ / mois"></div>
         </div>
-        <label for="description">Description du poste</label>
-        <textarea id="description" name="description" required placeholder="Missions, horaires, avantages…"></textarea>
-        <label for="competences">Compétences (séparées par des virgules)</label>
+        <label for="description">${t("Description du poste")}</label>
+        <textarea id="description" name="description" required placeholder="${e(t("Missions, horaires, avantages…"))}"></textarea>
+        <label for="competences">${t("Compétences (séparées par des virgules)")}</label>
         <input id="competences" name="competences" placeholder="Ex : Excel, Français, Permis B">
-        <button class="btn btn-rouge">Publier l'offre</button>
+        <button class="btn btn-rouge">${t("Publier l'offre")}</button>
       </form>`;
   },
 
@@ -586,25 +691,25 @@ const pages = {
       <tr>
         <td><a href="#/talent/${c.demandeur_id}"><b>${e(c.nom)}</b></a><br><small>${e(c.titre || "")} · ${e(c.ville)}</small><br><small>${e(c.email)}</small></td>
         <td style="white-space:pre-line">${e(c.message)}</td>
-        <td><select data-statut="${c.id}">${Object.entries(STATUTS).map(([k, v]) => `<option value="${k}" ${k === c.statut ? "selected" : ""}>${v}</option>`).join("")}</select></td>
+        <td><select data-statut="${c.id}">${Object.entries(STATUTS).map(([k, v]) => `<option value="${k}" ${k === c.statut ? "selected" : ""}>${e(t(v))}</option>`).join("")}</select></td>
       </tr>`).join("");
     return `
-      <div class="page-titre"><h1>Candidats</h1><a href="#/espace">← Mon espace</a></div>
-      <p class="sous">Pour l'offre « ${e(o.titre)} » · ${liste.length} candidature(s)</p>
+      <div class="page-titre"><h1>${t("Candidats")}</h1><a href="#/espace">${t("← Mon espace")}</a></div>
+      <p class="sous">${e(t("Pour l'offre « {titre} » · {n} candidature(s)", { titre: o.titre, n: liste.length }))}</p>
       <div class="carte table-scroll">
-        ${liste.length ? `<table><tr><th>Candidat</th><th>Message</th><th>Statut</th></tr>${lignes}</table>` : '<p class="vide">Pas encore de candidat. Partage ton offre !</p>'}
+        ${liste.length ? `<table><tr><th>${t("Candidat")}</th><th>${t("Message")}</th><th>${t("Statut")}</th></tr>${lignes}</table>` : `<p class="vide">${t("Pas encore de candidat. Partage ton offre !")}</p>`}
       </div>`;
   },
 
   introuvable() {
-    return `<div class="vide"><h1>Oups ! 🤔</h1><p>Cette page n'existe pas.</p><a class="btn" href="#/">Retour à l'accueil</a></div>`;
+    return `<div class="vide"><h1>${t("Oups ! 🤔")}</h1><p>${t("Cette page n'existe pas.")}</p><a class="btn" href="#/">${t("Retour à l'accueil")}</a></div>`;
   },
 };
 
 // ---------- Vérification de l'e-mail (OTP) ----------
 
 function etapes(active) {
-  const noms = ["Ton e-mail", "Le code reçu", "Ton dossier"];
+  const noms = [t("Ton e-mail"), t("Le code reçu"), t("Ton dossier")];
   return `<ol class="etapes">${noms.map((n, i) =>
     `<li class="${i + 1 < active ? "faite" : i + 1 === active ? "active" : ""}"><span>${i + 1 < active ? "✔" : i + 1}</span>${e(n)}</li>`).join("")}</ol>`;
 }
@@ -615,24 +720,24 @@ function etapesOtp() {
     return `
       <form class="form carte" data-form="otp-email">
         ${etapes(1)}
-        <h1>Rejoins Musala</h1>
-        <p>Pour commencer, on vérifie que ton adresse e-mail t'appartient bien et que tu n'es pas un robot 🤖. Tu vas recevoir un <b>code à 6 chiffres</b>.</p>
-        <label for="otp-email">Ton adresse e-mail${OBL}</label>
+        <h1>${t("Rejoins Musala")}</h1>
+        <p>${t("Pour commencer, on vérifie que ton adresse e-mail t'appartient bien et que tu n'es pas un robot 🤖. Tu vas recevoir un code à 6 chiffres.")}</p>
+        <label for="otp-email">${t("Ton adresse e-mail")}${OBL}</label>
         <input id="otp-email" name="email" type="email" required autocomplete="email" maxlength="120">
         <!-- Piège à robots : ce champ est invisible pour les humains. Un robot qui le remplit est bloqué. -->
         <div class="piege" aria-hidden="true">
-          <label for="site_web">Ne pas remplir</label>
+          <label for="site_web">${t("Ne pas remplir")}</label>
           <input id="site_web" name="site_web" tabindex="-1" autocomplete="off">
         </div>
-        <button class="btn btn-rouge">Recevoir mon code</button>
-        <p style="text-align:center">Déjà inscrit ? <a href="#/connexion">Connecte-toi</a></p>
+        <button class="btn btn-rouge">${t("Recevoir mon code")}</button>
+        <p style="text-align:center">${t("Déjà inscrit ?")} <a href="#/connexion">${t("Connecte-toi")}</a></p>
       </form>`;
   }
   const minutes = Math.max(1, Math.ceil((c.expire - Date.now()) / 60000));
   const demo = OTP.boiteDemo ? `
     <div class="boite-demo carte">
-      <p class="boite-titre">📬 Boîte mail de démonstration</p>
-      <p class="sous">En mode démo, aucun e-mail n'est vraiment envoyé : voici le message que tu recevrais.</p>
+      <p class="boite-titre">${t("📬 Boîte mail de démonstration")}</p>
+      <p class="sous">${t("En mode démo, aucun e-mail n'est vraiment envoyé : voici le message que tu recevrais.")}</p>
       <div class="email-demo">
         <p><b>De :</b> Musala &lt;no-reply@musala.cd&gt;<br><b>À :</b> ${e(OTP.boiteDemo.a)}<br><b>Objet :</b> ${e(OTP.boiteDemo.sujet)}</p>
         <p class="email-texte">${e(OTP.boiteDemo.texte)}</p>
@@ -641,16 +746,16 @@ function etapesOtp() {
   return `
     <form class="form carte" data-form="otp-code">
       ${etapes(2)}
-      <h1>Entre ton code</h1>
-      <p>Nous avons envoyé un code à 6 chiffres à <b>${e(c.email)}</b>. Il est valable ${minutes} minute(s).</p>
-      <label for="otp-code">Code reçu par e-mail${OBL}</label>
+      <h1>${t("Entre ton code")}</h1>
+      <p>${t("Nous avons envoyé un code à 6 chiffres à {email}. Il est valable {minutes} minute(s).", { email: `<b>${e(c.email)}</b>`, minutes })}</p>
+      <label for="otp-code">${t("Code reçu par e-mail")}${OBL}</label>
       <input id="otp-code" name="code" class="champ-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="••••••">
-      <button class="btn btn-rouge">Vérifier mon code</button>
+      <button class="btn btn-rouge">${t("Vérifier mon code")}</button>
       <p class="actions" style="justify-content:center">
-        <button type="button" class="btn btn-petit btn-blanc" data-action="otp-renvoyer">Renvoyer le code</button>
-        <button type="button" class="btn btn-petit btn-blanc" data-action="otp-recommencer">Changer d'adresse e-mail</button>
+        <button type="button" class="btn btn-petit btn-blanc" data-action="otp-renvoyer">${t("Renvoyer le code")}</button>
+        <button type="button" class="btn btn-petit btn-blanc" data-action="otp-recommencer">${t("Changer d'adresse e-mail")}</button>
       </p>
-      <p class="sous">Pas reçu ? Regarde dans tes courriers indésirables (spam).</p>
+      <p class="sous">${t("Pas reçu ? Regarde dans tes courriers indésirables (spam).")}</p>
     </form>
     ${demo}`;
 }
@@ -659,40 +764,40 @@ function etapesOtp() {
 
 function blocCriteres(role) {
   const intro = role === "employeur"
-    ? "Pour protéger les demandeurs contre les fausses offres, chaque employeur est vérifié par un administrateur avant de pouvoir recruter. Il faut :"
-    : "Pour garantir des profils sérieux aux employeurs, chaque demandeur est vérifié par un administrateur avant de pouvoir postuler. Il faut :";
+    ? t("Pour protéger les demandeurs contre les fausses offres, chaque employeur est vérifié par un administrateur avant de pouvoir recruter. Il faut :")
+    : t("Pour garantir des profils sérieux aux employeurs, chaque demandeur est vérifié par un administrateur avant de pouvoir postuler. Il faut :");
   const criteres = role === "employeur" ? CRITERES_EMPLOYEUR : CRITERES_DEMANDEUR;
-  return `<div class="astuce">${intro}<ul class="criteres">${criteres.map((c) => `<li>${e(c.texte)}</li>`).join("")}</ul></div>`;
+  return `<div class="astuce">${intro}<ul class="criteres">${criteres.map((c) => `<li>${e(t(c.texte))}</li>`).join("")}</ul></div>`;
 }
 
 // p : préfixe des identifiants, pour pouvoir afficher deux dossiers sur la même page.
 function champsEmployeur(v, p = "") {
   return `
     <div class="deux-col">
-      <div><label for="${p}secteur">Secteur${OBL}</label><select required id="${p}secteur" name="secteur">${options(SECTEURS, v.secteur, "Choisir…")}</select></div>
-      <div><label for="${p}rccm">N° RCCM${OBL}</label><input required id="${p}rccm" name="rccm" value="${e(v.rccm)}" maxlength="60" placeholder="Ex : CD/KIN/RCCM/24-B-01234"></div>
-      <div><label for="${p}id_nat">N° Id. Nat.${OBL}</label><input required id="${p}id_nat" name="id_nat" value="${e(v.id_nat)}" maxlength="60"></div>
-      <div><label for="${p}nif">N° Impôt (NIF)${OBL}</label><input required id="${p}nif" name="nif" value="${e(v.nif)}" maxlength="60"></div>
-      <div><label for="${p}responsable">Nom du responsable${OBL}</label><input required id="${p}responsable" name="responsable" value="${e(v.responsable)}" maxlength="100"></div>
-      <div><label for="${p}fonction_responsable">Sa fonction${OBL}</label><input required id="${p}fonction_responsable" name="fonction_responsable" value="${e(v.fonction_responsable)}" maxlength="100" placeholder="Ex : Directeur RH"></div>
+      <div><label for="${p}secteur">${t("Secteur")}${OBL}</label><select required id="${p}secteur" name="secteur">${options(SECTEURS, v.secteur, "Choisir…")}</select></div>
+      <div><label for="${p}rccm">${t("N° RCCM")}${OBL}</label><input required id="${p}rccm" name="rccm" value="${e(v.rccm)}" maxlength="60" placeholder="Ex : CD/KIN/RCCM/24-B-01234"></div>
+      <div><label for="${p}id_nat">${t("N° Id. Nat.")}${OBL}</label><input required id="${p}id_nat" name="id_nat" value="${e(v.id_nat)}" maxlength="60"></div>
+      <div><label for="${p}nif">${t("N° Impôt (NIF)")}${OBL}</label><input required id="${p}nif" name="nif" value="${e(v.nif)}" maxlength="60"></div>
+      <div><label for="${p}responsable">${t("Nom du responsable")}${OBL}</label><input required id="${p}responsable" name="responsable" value="${e(v.responsable)}" maxlength="100"></div>
+      <div><label for="${p}fonction_responsable">${t("Sa fonction")}${OBL}</label><input required id="${p}fonction_responsable" name="fonction_responsable" value="${e(v.fonction_responsable)}" maxlength="100" placeholder="Ex : Directeur RH"></div>
     </div>
-    <label for="${p}adresse">Adresse du siège${OBL}</label>
+    <label for="${p}adresse">${t("Adresse du siège")}${OBL}</label>
     <input required id="${p}adresse" name="adresse" value="${e(v.adresse)}" maxlength="200" placeholder="N°, avenue, commune, ville">`;
 }
 
 function champsDemandeur(v, p = "") {
   return `
     <div class="deux-col">
-      <div><label for="${p}date_naissance">Date de naissance${OBL}</label><input required id="${p}date_naissance" name="date_naissance" type="date" value="${e(v.date_naissance)}"></div>
-      <div><label for="${p}niveau_etudes">Niveau d'études${OBL}</label><select required id="${p}niveau_etudes" name="niveau_etudes">${options(NIVEAUX, v.niveau_etudes, "Choisir…")}</select></div>
-      <div><label for="${p}type_piece">Pièce d'identité${OBL}</label><select required id="${p}type_piece" name="type_piece">${options(PIECES, v.type_piece, "Choisir…")}</select></div>
-      <div><label for="${p}numero_piece">N° de la pièce${OBL}</label><input required id="${p}numero_piece" name="numero_piece" value="${e(v.numero_piece)}" maxlength="30"></div>
+      <div><label for="${p}date_naissance">${t("Date de naissance")}${OBL}</label><input required id="${p}date_naissance" name="date_naissance" type="date" value="${e(v.date_naissance)}"></div>
+      <div><label for="${p}niveau_etudes">${t("Niveau d'études")}${OBL}</label><select required id="${p}niveau_etudes" name="niveau_etudes">${options(NIVEAUX, v.niveau_etudes, "Choisir…")}</select></div>
+      <div><label for="${p}type_piece">${t("Pièce d'identité")}${OBL}</label><select required id="${p}type_piece" name="type_piece">${options(PIECES, v.type_piece, "Choisir…")}</select></div>
+      <div><label for="${p}numero_piece">${t("N° de la pièce")}${OBL}</label><input required id="${p}numero_piece" name="numero_piece" value="${e(v.numero_piece)}" maxlength="30"></div>
     </div>
-    <label for="${p}adresse">Adresse de résidence${OBL}</label>
+    <label for="${p}adresse">${t("Adresse de résidence")}${OBL}</label>
     <input required id="${p}adresse" name="adresse" value="${e(v.adresse)}" maxlength="200" placeholder="N°, avenue, quartier, commune">
-    <label for="${p}titre">Métier recherché${OBL}</label>
+    <label for="${p}titre">${t("Métier recherché")}${OBL}</label>
     <input required id="${p}titre" name="titre" value="${e(v.titre)}" maxlength="100" placeholder="Ex : Comptable">
-    <label for="${p}competences">Compétences (séparées par des virgules)${OBL}</label>
+    <label for="${p}competences">${t("Compétences (séparées par des virgules)")}${OBL}</label>
     <input required id="${p}competences" name="competences" value="${e(v.competences)}" maxlength="300" placeholder="Ex : Excel, Anglais, Vente">`;
 }
 
@@ -732,13 +837,13 @@ function erreurDossier(role, d) {
 
 // Enregistre le dossier et le (re)met en attente de validation.
 function enregistrerDossier(role, userId, d) {
-  const t = (cle) => String(d[cle] || "").trim();
+  const val = (cle) => String(d[cle] || "").trim();
   if (role === "employeur") {
     DB.executer(`UPDATE entreprises SET secteur = ?, rccm = ?, id_nat = ?, nif = ?, adresse = ?, responsable = ?, fonction_responsable = ?
-      WHERE user_id = ?`, [d.secteur, t("rccm"), t("id_nat"), t("nif"), t("adresse"), t("responsable"), t("fonction_responsable"), userId]);
+      WHERE user_id = ?`, [d.secteur, val("rccm"), val("id_nat"), val("nif"), val("adresse"), val("responsable"), val("fonction_responsable"), userId]);
   } else {
     DB.executer(`UPDATE profils SET date_naissance = ?, type_piece = ?, numero_piece = ?, adresse = ?, niveau_etudes = ?, titre = ?, competences = ?
-      WHERE user_id = ?`, [d.date_naissance, d.type_piece, t("numero_piece").toUpperCase(), t("adresse"), d.niveau_etudes, t("titre"), t("competences"), userId]);
+      WHERE user_id = ?`, [d.date_naissance, d.type_piece, val("numero_piece").toUpperCase(), val("adresse"), d.niveau_etudes, val("titre"), val("competences"), userId]);
   }
   DB.executer(`UPDATE users SET statut_compte = 'en_attente', dossier_envoye_le = datetime('now'),
     motif = NULL, decide_le = NULL, decide_par = NULL WHERE id = ?`, [userId]);
@@ -748,22 +853,22 @@ function bandeauStatut(moi) {
   const s = moi.statut_compte;
   if (s === "valide") return "";
   const droits = moi.role === "employeur"
-    ? "Tu pourras publier des offres dès que ton compte sera validé."
-    : "Tu pourras postuler aux offres et apparaître dans les talents dès que ton dossier sera validé.";
+    ? t("Tu pourras publier des offres dès que ton compte sera validé.")
+    : t("Tu pourras postuler aux offres et apparaître dans les talents dès que ton dossier sera validé.");
   const textes = {
-    en_attente: `⏳ <b>Ton dossier est en cours de vérification.</b> Un administrateur va contrôler tes informations. ${droits}`,
-    refuse: "❌ <b>Ton dossier a été refusé.</b> Corrige les informations ci-dessous puis renvoie-le.",
-    suspendu: "⛔ <b>Ton compte est suspendu.</b> Contacte l'administrateur de Musala.",
+    en_attente: `⏳ <b>${t("Ton dossier est en cours de vérification.")}</b> ${t("Un administrateur va contrôler tes informations.")} ${droits}`,
+    refuse: `❌ <b>${t("Ton dossier a été refusé.")}</b> ${t("Corrige les informations ci-dessous puis renvoie-le.")}`,
+    suspendu: `⛔ <b>${t("Ton compte est suspendu.")}</b> ${t("Contacte l'administrateur de Musala.")}`,
   };
-  return `<div class="bandeau bandeau-${e(s)}">${textes[s] || ""}${moi.motif ? `<br>Motif : <i>${e(moi.motif)}</i>` : ""}</div>`;
+  return `<div class="bandeau bandeau-${e(s)}">${textes[s] || ""}${moi.motif ? `<br>${t("Motif :")} <i>${e(moi.motif)}</i>` : ""}</div>`;
 }
 
 function enTeteEspace(moi, titre, bouton = "") {
   const gestion = estAdmin(moi) || estSuperAdmin(moi);
-  const pastille = gestion ? "" : ` <span class="statut statut-compte-${e(moi.statut_compte)}">${e(STATUTS_COMPTE[moi.statut_compte])}</span>`;
+  const pastille = gestion ? "" : ` <span class="statut statut-compte-${e(moi.statut_compte)}">${e(t(STATUTS_COMPTE[moi.statut_compte]))}</span>`;
   return `
     <div class="page-titre"><h1>${titre}${pastille}</h1>${bouton}</div>
-    <p class="lien-mdp"><a href="#/mot-de-passe">🔑 Changer mon mot de passe</a></p>
+    <p class="lien-mdp"><a href="#/mot-de-passe">${t("🔑 Changer mon mot de passe")}</a></p>
     ${gestion ? "" : bandeauStatut(moi)}`;
 }
 
@@ -823,7 +928,7 @@ function espaceSuperAdmin(moi) {
 
     <h2 class="section">Créer un administrateur</h2>
     <form class="carte" data-form="creer-admin">
-      ${NOTE_OBL}
+      ${noteObl()}
       <div class="deux-col">
         <div><label for="nom">Nom complet${OBL}</label><input id="nom" name="nom" required maxlength="100"></div>
         <div><label for="email">E-mail${OBL}</label><input id="email" name="email" type="email" required></div>
@@ -842,17 +947,17 @@ function espaceSuperAdmin(moi) {
 function formulaireDossier(moi, contenu) {
   const modifiable = moi.statut_compte === "en_attente" || moi.statut_compte === "refuse";
   return `
-    <h2 class="section">Mon dossier de vérification</h2>
+    <h2 class="section">${t("Mon dossier de vérification")}</h2>
     <form class="carte" data-form="dossier">
       <fieldset ${modifiable ? "" : "disabled"} class="bloc-role">
         ${blocCriteres(moi.role)}
-        ${NOTE_OBL}
+        ${noteObl()}
         <div class="deux-col">
-          <div><label for="ville">Ville${OBL}</label><select id="ville" name="ville" required>${options(VILLES, moi.ville)}</select></div>
-          <div><label for="telephone">Téléphone${OBL}</label><input id="telephone" name="telephone" value="${e(moi.telephone)}" placeholder="+243…" required></div>
+          <div><label for="ville">${t("Ville")}${OBL}</label><select id="ville" name="ville" required>${options(VILLES, moi.ville)}</select></div>
+          <div><label for="telephone">${t("Téléphone")}${OBL}</label><input id="telephone" name="telephone" value="${e(moi.telephone)}" placeholder="+243…" required></div>
         </div>
         ${contenu}
-        ${modifiable ? `<button class="btn btn-rouge" style="margin-top:16px">${moi.statut_compte === "refuse" ? "Renvoyer mon dossier" : "Mettre à jour mon dossier"}</button>` : ""}
+        ${modifiable ? `<button class="btn btn-rouge" style="margin-top:16px">${moi.statut_compte === "refuse" ? t("Renvoyer mon dossier") : t("Mettre à jour mon dossier")}</button>` : ""}
       </fieldset>
     </form>`;
 }
@@ -867,67 +972,67 @@ function ficheEmployeur(ent) {
 function ficheDemandeur(p) {
   const ans = age(p.date_naissance);
   return fiche([
-    ["Date de naissance", `${dateFr(p.date_naissance)}${ans !== null ? ` (${ans} ans)` : ""}`],
-    ["Pièce d'identité", [p.type_piece, p.numero_piece].filter(Boolean).join(" n° ")],
-    ["Adresse", p.adresse], ["Niveau d'études", p.niveau_etudes],
+    ["Date de naissance", `${dateFr(p.date_naissance)}${ans !== null ? ` (${t("{n} ans", { n: ans })})` : ""}`],
+    ["Pièce d'identité", [p.type_piece && t(p.type_piece), p.numero_piece].filter(Boolean).join(" n° ")],
+    ["Adresse", p.adresse], ["Niveau d'études", p.niveau_etudes && t(p.niveau_etudes)],
     ["Métier recherché", p.titre], ["Compétences", p.competences],
   ]);
 }
 
 function fiche(lignes) {
-  return `<dl class="fiche">${lignes.map(([k, v]) => `<dt>${e(k)}</dt><dd>${e(v || "—")}</dd>`).join("")}</dl>`;
+  return `<dl class="fiche">${lignes.map(([k, v]) => `<dt>${e(t(k))}</dt><dd>${e(v || "—")}</dd>`).join("")}</dl>`;
 }
 
 // ---------- Espaces personnels ----------
 
 function espaceDemandeur(moi) {
   const p = DB.un("SELECT * FROM profils WHERE user_id = ?", [moi.id]) || {};
-  const titre = `Bonjour ${e(moi.nom.split(" ")[0])} 👋`;
+  const titre = e(t("Bonjour {nom} 👋", { nom: moi.nom.split(" ")[0] }));
 
   if (moi.statut_compte !== "valide") {
     return enTeteEspace(moi, titre) + formulaireDossier(moi, `
       ${champsDemandeur(p)}
-      <label for="bio">À propos de moi (facultatif)</label>
-      <textarea id="bio" name="bio" placeholder="Qui es-tu ? Qu'est-ce qui te motive ?">${e(p.bio)}</textarea>
-      <label for="experience">Expérience (facultatif)</label>
-      <textarea id="experience" name="experience" placeholder="Tes emplois, stages, projets…">${e(p.experience)}</textarea>`);
+      <label for="bio">${t("À propos de moi (facultatif)")}</label>
+      <textarea id="bio" name="bio" placeholder="${e(t("Qui es-tu ? Qu'est-ce qui te motive ?"))}">${e(p.bio)}</textarea>
+      <label for="experience">${t("Expérience (facultatif)")}</label>
+      <textarea id="experience" name="experience" placeholder="${e(t("Tes emplois, stages, projets…"))}">${e(p.experience)}</textarea>`);
   }
 
   const cands = DB.tous(`SELECT c.*, o.titre, o.ville, u.nom AS entreprise FROM candidatures c
     JOIN offres o ON o.id = c.offre_id JOIN users u ON u.id = o.employeur_id
     WHERE c.demandeur_id = ? ORDER BY c.cree_le DESC`, [moi.id]);
   return `
-    ${enTeteEspace(moi, titre, `<a class="btn" href="#/talent/${moi.id}">Voir mon profil public</a>`)}
+    ${enTeteEspace(moi, titre, `<a class="btn" href="#/talent/${moi.id}">${t("Voir mon profil public")}</a>`)}
 
-    <h2 class="section">Mes candidatures</h2>
+    <h2 class="section">${t("Mes candidatures")}</h2>
     <div class="carte table-scroll">
-      ${cands.length ? `<table><tr><th>Offre</th><th>Entreprise</th><th>Envoyée</th><th>Statut</th></tr>
-        ${cands.map((c) => `<tr><td><a href="#/offre/${c.offre_id}">${e(c.titre)}</a></td><td>${e(c.entreprise)}</td><td>${depuis(c.cree_le)}</td><td><span class="statut statut-${e(c.statut)}">${e(STATUTS[c.statut])}</span></td></tr>`).join("")}
-      </table>` : '<p class="vide">Tu n\'as pas encore postulé. <a href="#/offres">Découvre les offres</a> !</p>'}
+      ${cands.length ? `<table><tr><th>${t("Offre")}</th><th>${t("Entreprise")}</th><th>${t("Envoyée le")}</th><th>${t("Statut")}</th></tr>
+        ${cands.map((c) => `<tr><td><a href="#/offre/${c.offre_id}">${e(c.titre)}</a></td><td>${e(c.entreprise)}</td><td>${depuis(c.cree_le)}</td><td><span class="statut statut-${e(c.statut)}">${e(t(STATUTS[c.statut]))}</span></td></tr>`).join("")}
+      </table>` : `<p class="vide">${t("Tu n'as pas encore postulé.")} <a href="#/offres">${t("Découvre les offres")}</a> !</p>`}
     </div>
 
-    <h2 class="section">Mon profil</h2>
+    <h2 class="section">${t("Mon profil")}</h2>
     <form class="carte" data-form="profil">
       <div class="deux-col">
-        <div><label for="titre">Mon métier</label><input id="titre" name="titre" value="${e(p.titre)}" placeholder="Ex : Comptable"></div>
-        <div><label for="ville">Ville</label><select id="ville" name="ville">${options(VILLES, moi.ville)}</select></div>
-        <div><label for="telephone">Téléphone</label><input id="telephone" name="telephone" value="${e(moi.telephone)}"></div>
-        <div><label for="niveau_etudes">Niveau d'études</label><select id="niveau_etudes" name="niveau_etudes">${options(NIVEAUX, p.niveau_etudes)}</select></div>
+        <div><label for="titre">${t("Mon métier")}</label><input id="titre" name="titre" value="${e(p.titre)}" placeholder="Ex : Comptable"></div>
+        <div><label for="ville">${t("Ville")}</label><select id="ville" name="ville">${options(VILLES, moi.ville)}</select></div>
+        <div><label for="telephone">${t("Téléphone")}</label><input id="telephone" name="telephone" value="${e(moi.telephone)}"></div>
+        <div><label for="niveau_etudes">${t("Niveau d'études")}</label><select id="niveau_etudes" name="niveau_etudes">${options(NIVEAUX, p.niveau_etudes)}</select></div>
       </div>
-      <label for="bio">À propos de moi</label>
-      <textarea id="bio" name="bio" placeholder="Qui es-tu ? Qu'est-ce qui te motive ?">${e(p.bio)}</textarea>
-      <label for="competences">Compétences (séparées par des virgules)</label>
+      <label for="bio">${t("À propos de moi")}</label>
+      <textarea id="bio" name="bio" placeholder="${e(t("Qui es-tu ? Qu'est-ce qui te motive ?"))}">${e(p.bio)}</textarea>
+      <label for="competences">${t("Compétences (séparées par des virgules)")}</label>
       <input id="competences" name="competences" value="${e(p.competences)}" placeholder="Ex : Excel, Anglais, Vente">
-      <label for="experience">Expérience</label>
-      <textarea id="experience" name="experience" placeholder="Tes emplois, stages, projets…">${e(p.experience)}</textarea>
-      <label class="coche"><input type="checkbox" name="disponible" ${p.disponible !== 0 ? "checked" : ""}> Je suis disponible pour un emploi</label>
-      <button class="btn btn-rouge" style="margin-top:16px">Enregistrer mon profil</button>
+      <label for="experience">${t("Expérience")}</label>
+      <textarea id="experience" name="experience" placeholder="${e(t("Tes emplois, stages, projets…"))}">${e(p.experience)}</textarea>
+      <label class="coche"><input type="checkbox" name="disponible" ${p.disponible !== 0 ? "checked" : ""}> ${t("Je suis disponible pour un emploi")}</label>
+      <button class="btn btn-rouge" style="margin-top:16px">${t("Enregistrer mon profil")}</button>
     </form>
 
-    <h2 class="section">Dossier vérifié ✔</h2>
+    <h2 class="section">${t("Dossier vérifié ✔")}</h2>
     <div class="carte">
       ${ficheDemandeur(p)}
-      <p class="sous">Ton identité est vérifiée. Pour la modifier, contacte l'administrateur des demandeurs : elle sera vérifiée à nouveau.</p>
+      <p class="sous">${t("Ton identité est vérifiée. Pour la modifier, contacte l'administrateur des demandeurs : elle sera vérifiée à nouveau.")}</p>
     </div>`;
 }
 
@@ -938,48 +1043,48 @@ function espaceEmployeur(moi) {
   if (moi.statut_compte !== "valide") {
     return enTeteEspace(moi, titre) + formulaireDossier(moi, `
       ${champsEmployeur(ent)}
-      <label for="description">Présentation de l'entreprise</label>
-      <textarea id="description" name="description" placeholder="Que fait ton entreprise ?">${e(ent.description)}</textarea>
-      <label for="site">Site web (facultatif)</label>
+      <label for="description">${t("Présentation de l'entreprise")}</label>
+      <textarea id="description" name="description" placeholder="${e(t("Que fait ton entreprise ?"))}">${e(ent.description)}</textarea>
+      <label for="site">${t("Site web (facultatif)")}</label>
       <input id="site" name="site" value="${e(ent.site)}" placeholder="https://…">`);
   }
 
   const offres = DB.tous(`SELECT o.*, (SELECT COUNT(*) FROM candidatures c WHERE c.offre_id = o.id) AS nb
     FROM offres o WHERE o.employeur_id = ? ORDER BY o.cree_le DESC, o.id DESC`, [moi.id]);
   return `
-    ${enTeteEspace(moi, titre, '<a class="btn btn-rouge" href="#/espace/nouvelle-offre">+ Publier une offre</a>')}
+    ${enTeteEspace(moi, titre, `<a class="btn btn-rouge" href="#/espace/nouvelle-offre">${t("+ Publier une offre")}</a>`)}
 
-    <h2 class="section">Mes offres</h2>
+    <h2 class="section">${t("Mes offres")}</h2>
     <div class="carte table-scroll">
-      ${offres.length ? `<table><tr><th>Offre</th><th>Ville</th><th>Candidats</th><th>État</th><th></th></tr>
+      ${offres.length ? `<table><tr><th>${t("Offre")}</th><th>${t("Ville")}</th><th>${t("Candidats")}</th><th>${t("État")}</th><th></th></tr>
         ${offres.map((o) => `<tr>
-          <td><a href="#/offre/${o.id}">${e(o.titre)}</a><br><small>${e(o.type_contrat)} · ${depuis(o.cree_le)}</small></td>
+          <td><a href="#/offre/${o.id}">${e(o.titre)}</a><br><small>${e(t(o.type_contrat))} · ${depuis(o.cree_le)}</small></td>
           <td>${e(o.ville)}</td>
-          <td><a href="#/espace/candidats/${o.id}"><b>${o.nb}</b> candidat(s)</a></td>
-          <td>${o.active ? '<span class="statut statut-retenue">En ligne</span>' : '<span class="statut statut-envoyee">Fermée</span>'}</td>
-          <td><button class="btn btn-petit btn-blanc" data-basculer="${o.id}">${o.active ? "Fermer" : "Rouvrir"}</button></td>
+          <td><a href="#/espace/candidats/${o.id}">${t("{n} candidat(s)", { n: `<b>${o.nb}</b>` })}</a></td>
+          <td>${o.active ? `<span class="statut statut-retenue">${t("En ligne")}</span>` : `<span class="statut statut-envoyee">${t("Fermée")}</span>`}</td>
+          <td><button class="btn btn-petit btn-blanc" data-basculer="${o.id}">${o.active ? t("Fermer") : t("Rouvrir")}</button></td>
         </tr>`).join("")}
-      </table>` : '<p class="vide">Aucune offre publiée. Lance-toi !</p>'}
+      </table>` : `<p class="vide">${t("Aucune offre publiée. Lance-toi !")}</p>`}
     </div>
 
-    <h2 class="section">Mon entreprise</h2>
+    <h2 class="section">${t("Mon entreprise")}</h2>
     <form class="carte" data-form="entreprise">
       <div class="deux-col">
-        <div><label for="ville">Ville</label><select id="ville" name="ville">${options(VILLES, moi.ville)}</select></div>
-        <div><label for="telephone">Téléphone</label><input id="telephone" name="telephone" value="${e(moi.telephone)}"></div>
+        <div><label for="ville">${t("Ville")}</label><select id="ville" name="ville">${options(VILLES, moi.ville)}</select></div>
+        <div><label for="telephone">${t("Téléphone")}</label><input id="telephone" name="telephone" value="${e(moi.telephone)}"></div>
       </div>
-      <label for="site">Site web</label>
+      <label for="site">${t("Site web")}</label>
       <input id="site" name="site" value="${e(ent.site)}" placeholder="https://…">
-      <label for="description">Présentation</label>
-      <textarea id="description" name="description" placeholder="Que fait ton entreprise ?">${e(ent.description)}</textarea>
-      <button class="btn btn-rouge" style="margin-top:16px">Enregistrer</button>
+      <label for="description">${t("Présentation")}</label>
+      <textarea id="description" name="description" placeholder="${e(t("Que fait ton entreprise ?"))}">${e(ent.description)}</textarea>
+      <button class="btn btn-rouge" style="margin-top:16px">${t("Enregistrer")}</button>
     </form>
 
-    <h2 class="section">Dossier vérifié ✔</h2>
+    <h2 class="section">${t("Dossier vérifié ✔")}</h2>
     <div class="carte">
-      <p><b>Secteur :</b> ${e(ent.secteur || "—")}</p>
+      <p><b>${t("Secteur :")}</b> ${e(ent.secteur ? t(ent.secteur) : "—")}</p>
       ${ficheEmployeur(ent)}
-      <p class="sous">Pour modifier ces informations, contacte l'administrateur des employeurs : elles seront vérifiées à nouveau.</p>
+      <p class="sous">${t("Pour modifier ces informations, contacte l'administrateur des employeurs : elles seront vérifiées à nouveau.")}</p>
     </div>`;
 }
 
@@ -1458,6 +1563,9 @@ function afficher() {
 }
 
 window.addEventListener("hashchange", afficher);
+
+appliquerReglages();
+enregistrerHorsLigne();
 
 DB.init()
   .then(afficher)

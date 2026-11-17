@@ -14,14 +14,20 @@
   <header class="topbar">
     <div class="container topbar-inner">
       <a href="#/" class="logo"><span class="logo-mark">M</span>usala</a>
-      <button class="menu-btn" id="menuBtn" aria-label="Ouvrir le menu">☰</button>
       <nav class="nav" id="nav">
-        <a href="#/offres">Offres</a>
-        <a href="#/talents">Talents</a>
+        <a href="#/offres" id="lienOffres">Offres</a>
+        <a href="#/talents" id="lienTalents">Talents</a>
         <span id="navUser"></span>
       </nav>
+      <div class="reglages">
+        <select id="choixLangue" aria-label="Langue"></select>
+        <button class="bouton-leger" id="boutonLeger" aria-pressed="false" title="Mode léger">📶</button>
+        <button class="menu-btn" id="menuBtn" aria-label="Ouvrir le menu">☰</button>
+      </div>
     </div>
   </header>
+
+  <div id="bandeauLangue" class="bandeau-langue" hidden></div>
 
   <main id="app" class="container">
     <div class="loading">Chargement de Musala…</div>
@@ -29,8 +35,9 @@
 
   <footer class="footer">
     <div class="container">
-      <strong>Musala</strong> · « le travail » en lingala · Le réseau pro de la RDC 🇨🇩
-      <br><small>Projet d'Arnold · Code en Famille</small>
+      <strong>Musala</strong> · <span id="piedSlogan">« le travail » en lingala · Le réseau pro de la RDC</span> 🇨🇩
+      <br><small id="piedProjet">Projet d'Arnold · Code en Famille</small>
+      <p id="compteurDonnees" class="compteur" hidden></p>
     </div>
   </footer>
 
@@ -38,6 +45,7 @@
 
   <script src="vendor/sql-wasm.js"></script>
   <script src="js/db.js"></script>
+  <script src="js/i18n.js"></script>
   <script src="js/otp.js"></script>
   <script src="js/app.js"></script>
 </body>

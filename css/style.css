@@ -273,3 +273,28 @@ code.mdp { font-size: 18px; font-weight: 800; background: var(--blanc); padding:
 .email-texte { white-space: pre-line; margin-bottom: 0; }
 input[readonly] { background: var(--fond); color: var(--gris); }
 .form .actions .btn { width: auto; margin-top: 0; }
+
+/* ---------- Langue et réglages ---------- */
+.topbar-inner { gap: 12px; }
+.nav { margin-left: auto; }
+.reglages { display: flex; align-items: center; gap: 6px; }
+#choixLangue { width: auto; padding: 6px 8px; font-size: 13px; border-radius: 999px; font-weight: 600; }
+.bouton-leger { background: var(--fond); border: 2px solid var(--bord); border-radius: 999px; padding: 4px 10px; font-size: 16px; cursor: pointer; }
+.bouton-leger[aria-pressed="true"] { background: var(--bleu); border-color: var(--bleu); }
+.bandeau-langue { background: #fff4d6; color: #6b4700; text-align: center; padding: 8px 16px; font-size: 14px; }
+.compteur { margin: 10px 0 0; font-size: 13px; opacity: .9; }
+@media (max-width: 720px) {
+  .reglages { margin-left: auto; }
+  #choixLangue { max-width: 110px; }
+}
+
+/* ---------- Mode léger : moins d'effets, pages plus simples ---------- */
+html.leger *, html.leger *::before, html.leger *::after { transition: none !important; animation: none !important; box-shadow: none !important; }
+html.leger .hero { background: var(--bleu); padding: 24px 20px; margin: 16px 0; }
+html.leger .hero::before, html.leger .hero::after { display: none; }
+html.leger .carte { padding: 14px; border-radius: 10px; }
+html.leger .grille { gap: 8px; }
+html.leger .stat { padding: 10px; }
+html.leger .avatar { background: var(--bleu); }
+html.leger .btn:hover, html.leger .carte-lien:hover { transform: none; }
+.toast { border-radius: 16px; text-align: center; width: max-content; max-width: calc(100% - 32px); }

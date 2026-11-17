@@ -89,9 +89,10 @@ async function empreinteCode(sel, email, code) {
 }
 
 function messageOtp(code) {
+  // L'e-mail est écrit dans la langue choisie sur le site (voir js/i18n.js).
   return {
-    sujet: `${code} est ton code Musala`,
-    texte: `Bonjour,\n\nVoici ton code pour créer ton compte Musala : ${code}\n\nIl est valable 10 minutes. Ne le donne à personne : l'équipe Musala ne te le demandera jamais.\n\nSi tu n'as pas demandé ce code, ignore simplement cet e-mail.\n\nL'équipe Musala`,
+    sujet: t("{code} est ton code Musala", { code }),
+    texte: t("Bonjour,\n\nVoici ton code pour créer ton compte Musala : {code}\n\nIl est valable 10 minutes. Ne le donne à personne : l'équipe Musala ne te le demandera jamais.\n\nSi tu n'as pas demandé ce code, ignore simplement cet e-mail.\n\nL'équipe Musala", { code }),
   };
 }
 

@@ -57,6 +57,24 @@ Nom de l'entreprise, ville, téléphone, e-mail, mot de passe, secteur, n° RCCM
 
 Les critères sont dans `js/app.js` (listes `CRITERES_DEMANDEUR` et `CRITERES_EMPLOYEUR`, et constante `AGE_MINIMUM`) et peuvent être modifiés.
 
+## Les langues 🗣️
+
+Musala est disponible en **français, lingala, swahili, tshiluba et kikongo**. On choisit sa langue en haut de la page ; le choix est retenu sur l'appareil.
+
+- Toutes les pages des visiteurs, des demandeurs et des employeurs sont traduites, ainsi que les messages et l'e-mail du code de vérification. Les pages d'administration restent en français.
+- Les offres et les profils restent dans la langue où ils ont été écrits.
+- Toutes les traductions sont dans **`js/i18n.js`**. Chaque phrase française y est suivie de ses 4 traductions, dans l'ordre **[lingala, swahili, tshiluba, kikongo]**. Une phrase sans traduction reste en français.
+
+> ⚠️ **Les traductions ont été préparées par une IA et doivent être relues par des personnes qui parlent chaque langue**, surtout le tshiluba et le kikongo. Un bandeau le rappelle sur le site quand on choisit une autre langue que le français.
+
+## Le mode léger 📶
+
+Pour économiser les données mobiles, qui coûtent cher :
+
+- **Musala reste dans le téléphone** après la 1re visite (fichier `sw.js`, un « service worker »). Les visites suivantes ne téléchargent presque rien, et le site s'ouvre **même sans Internet**. Mesuré : environ 870 Ko à la 1re visite (dont 690 Ko pour SQLite), puis seulement une petite vérification de mise à jour aux visites suivantes.
+- Le bouton **📶** active le **mode léger** : pas d'effets visuels (dégradés, ombres, animations), des listes plus courtes (6 éléments, puis « Voir plus »), et un **compteur** en bas de page qui montre ce que la visite a consommé.
+- Le mode léger s'active **tout seul** si le téléphone est réglé en « économie de données ».
+
 ## La base de données embarquée
 
 Musala utilise **SQLite** directement dans le navigateur, grâce à [sql.js](https://github.com/sql-js/sql.js) (fichiers dans `vendor/`).
@@ -113,6 +131,8 @@ vercel.json     les en-têtes de sécurité pour Vercel
 css/style.css   les couleurs et le style (bleu azur, blanc, rouge)
 js/db.js        la base de données SQLite embarquée
 js/otp.js       la vérification de l'e-mail par code (OTP)
+js/i18n.js      les traductions (français, lingala, swahili, tshiluba, kikongo)
+sw.js           garde Musala dans le téléphone (mode hors ligne)
 js/app.js       les pages et les actions
 vendor/         SQLite pour le navigateur (sql.js, licence MIT)
 ```
