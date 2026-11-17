@@ -476,8 +476,11 @@ const pages = {
 
   inscription(params) {
     const role = params.get("role") === "employeur" ? "employeur" : "demandeur";
+    // Étapes 1 et 2 : vérifier l'adresse e-mail avec un code reçu par e-mail.
+    if (!OTP.verifie || !OTP.estVerifie(OTP.verifie.email)) return etapesOtp();
     return `
       <form class="form carte" data-form="inscription">
+        ${etapes(3)}
         <h1>Rejoins Musala</h1>
         ${NOTE_OBL}
         <label>Je suis…</label>
@@ -497,8 +500,9 @@ const pages = {
             <input id="telephone" name="telephone" placeholder="+243…" required>
           </div>
         </div>
-        <label for="email">E-mail${OBL}</label>
-        <input id="email" name="email" type="email" required autocomplete="email">
+        <label for="email">E-mail <span class="verifie">✔ vérifié</span></label>
+        <input id="email" name="email" type="email" value="${e(OTP.verifie.email)}" readonly>
+        <p class="sous" style="margin:4px 0 0"><a href="#/inscription" data-action="otp-recommencer">Utiliser une autre adresse</a></p>
         <label for="mdp">Mot de passe (8 caractères minimum)${OBL}</label>
         <input id="mdp" name="mdp" type="password" minlength="8" required autocomplete="new-password">
 
@@ -596,6 +600,60 @@ const pages = {
     return `<div class="vide"><h1>Oups ! 🤔</h1><p>Cette page n'existe pas.</p><a class="btn" href="#/">Retour à l'accueil</a></div>`;
   },
 };
+
+// ---------- Vérification de l'e-mail (OTP) ----------
+
+function etapes(active) {
+  const noms = ["Ton e-mail", "Le code reçu", "Ton dossier"];
+  return `<ol class="etapes">${noms.map((n, i) =>
+    `<li class="${i + 1 < active ? "faite" : i + 1 === active ? "active" : ""}"><span>${i + 1 < active ? "✔" : i + 1}</span>${e(n)}</li>`).join("")}</ol>`;
+}
+
+function etapesOtp() {
+  const c = OTP.enCours;
+  if (!c) {
+    return `
+      <form class="form carte" data-form="otp-email">
+        ${etapes(1)}
+        <h1>Rejoins Musala</h1>
+        <p>Pour commencer, on vérifie que ton adresse e-mail t'appartient bien et que tu n'es pas un robot 🤖. Tu vas recevoir un <b>code à 6 chiffres</b>.</p>
+        <label for="otp-email">Ton adresse e-mail${OBL}</label>
+        <input id="otp-email" name="email" type="email" required autocomplete="email" maxlength="120">
+        <!-- Piège à robots : ce champ est invisible pour les humains. Un robot qui le remplit est bloqué. -->
+        <div class="piege" aria-hidden="true">
+          <label for="site_web">Ne pas remplir</label>
+          <input id="site_web" name="site_web" tabindex="-1" autocomplete="off">
+        </div>
+        <button class="btn btn-rouge">Recevoir mon code</button>
+        <p style="text-align:center">Déjà inscrit ? <a href="#/connexion">Connecte-toi</a></p>
+      </form>`;
+  }
+  const minutes = Math.max(1, Math.ceil((c.expire - Date.now()) / 60000));
+  const demo = OTP.boiteDemo ? `
+    <div class="boite-demo carte">
+      <p class="boite-titre">📬 Boîte mail de démonstration</p>
+      <p class="sous">En mode démo, aucun e-mail n'est vraiment envoyé : voici le message que tu recevrais.</p>
+      <div class="email-demo">
+        <p><b>De :</b> Musala &lt;no-reply@musala.cd&gt;<br><b>À :</b> ${e(OTP.boiteDemo.a)}<br><b>Objet :</b> ${e(OTP.boiteDemo.sujet)}</p>
+        <p class="email-texte">${e(OTP.boiteDemo.texte)}</p>
+      </div>
+    </div>` : "";
+  return `
+    <form class="form carte" data-form="otp-code">
+      ${etapes(2)}
+      <h1>Entre ton code</h1>
+      <p>Nous avons envoyé un code à 6 chiffres à <b>${e(c.email)}</b>. Il est valable ${minutes} minute(s).</p>
+      <label for="otp-code">Code reçu par e-mail${OBL}</label>
+      <input id="otp-code" name="code" class="champ-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="••••••">
+      <button class="btn btn-rouge">Vérifier mon code</button>
+      <p class="actions" style="justify-content:center">
+        <button type="button" class="btn btn-petit btn-blanc" data-action="otp-renvoyer">Renvoyer le code</button>
+        <button type="button" class="btn btn-petit btn-blanc" data-action="otp-recommencer">Changer d'adresse e-mail</button>
+      </p>
+      <p class="sous">Pas reçu ? Regarde dans tes courriers indésirables (spam).</p>
+    </form>
+    ${demo}`;
+}
 
 // ---------- Dossiers de vérification ----------
 
@@ -1064,11 +1122,46 @@ const formulaires = {
     aller(retour && retour.startsWith("#/") ? retour : "#/espace");
   },
 
+  async "otp-email"(form) {
+    const d = donneesForm(form);
+    const email = String(d.email || "").trim().toLowerCase();
+    // Un humain ne voit pas le champ piège : s'il est rempli, c'est un robot.
+    if (d.site_web) return toast("Envoi impossible.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 120) return toast("Cette adresse e-mail n'est pas valide.");
+    if (DB.un("SELECT id FROM users WHERE lower(email) = ?", [email])) return toast("Cet e-mail a déjà un compte. Connecte-toi !");
+    try {
+      await OTP.envoyer(email);
+    } catch (err) {
+      return toast(err.message);
+    }
+    toast("Code envoyé 📩");
+    afficher();
+    document.getElementById("otp-code")?.focus();
+  },
+
+  async "otp-code"(form) {
+    const erreur = await OTP.verifier(donneesForm(form).code);
+    if (erreur) {
+      toast(erreur);
+      // Code expiré ou trop d'essais : on revient à l'étape 1.
+      if (!OTP.enCours) afficher();
+      return;
+    }
+    toast("E-mail vérifié ✅ Continue ton inscription.");
+    afficher();
+  },
+
   async inscription(form) {
     const d = donneesForm(form);
     const nom = String(d.nom || "").trim();
     const email = String(d.email || "").trim();
     const mdp = String(d.mdp || "");
+    // L'adresse doit être celle qui a été vérifiée par code (même si la page a été modifiée).
+    if (!OTP.estVerifie(email)) {
+      OTP.reinitialiser();
+      toast("Vérifie d'abord ton adresse e-mail avec le code.");
+      return afficher();
+    }
     // Les règles sont vérifiées ici aussi : le formulaire seul peut être contourné.
     // On ne peut pas s'inscrire comme administrateur.
     if (!["demandeur", "employeur"].includes(d.role)) return toast("Choisis demandeur ou employeur.");
@@ -1087,6 +1180,7 @@ const formulaires = {
     DB.executer(d.role === "employeur" ? "INSERT INTO entreprises (user_id) VALUES (?)" : "INSERT INTO profils (user_id) VALUES (?)", [id]);
     enregistrerDossier(d.role, id, d);
     connecter(id);
+    OTP.reinitialiser();
     toast("Dossier envoyé ! Un administrateur va le vérifier 🔎");
     aller("#/espace");
   },
@@ -1286,6 +1380,16 @@ document.addEventListener("click", (ev) => {
   const cible = ev.target.closest("[data-action], [data-basculer]");
   if (!cible) return;
   if (cible.dataset.action === "deconnexion") deconnecter();
+  if (cible.dataset.action === "otp-recommencer") {
+    ev.preventDefault();
+    OTP.reinitialiser();
+    afficher();
+  }
+  if (cible.dataset.action === "otp-renvoyer" && OTP.enCours) {
+    OTP.envoyer(OTP.enCours.email)
+      .then(() => { toast("Nouveau code envoyé 📩"); afficher(); })
+      .catch((err) => toast(err.message));
+  }
   if (cible.dataset.basculer) {
     const moi = exigerValide("employeur");
     if (!moi) return;

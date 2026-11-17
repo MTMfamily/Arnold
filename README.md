@@ -25,6 +25,18 @@ Projet d'Arnold · atelier Code en Famille.
 
 Il n'y a qu'un seul super admin, et personne ne peut en créer un autre depuis le site.
 
+## La vérification de l'e-mail (code OTP)
+
+Avant de créer un compte employeur ou demandeur, il faut prouver que l'adresse e-mail est la sienne et qu'on n'est pas un robot :
+
+1. **Ton e-mail** : on indique son adresse. Un champ piège invisible bloque les robots qui remplissent tout automatiquement.
+2. **Le code reçu** : un code de **6 chiffres** est envoyé. Il est valable **10 minutes**, avec **5 essais** au maximum. On peut demander un nouveau code au bout d'**1 minute**.
+3. **Ton dossier** : le formulaire s'ouvre avec l'adresse vérifiée, qui ne peut plus être modifiée.
+
+Le code est tiré au hasard avec `crypto.getRandomValues`, et seule son empreinte (SHA-256 avec sel) est gardée, en mémoire uniquement.
+
+> 📬 **Mode démo** : un site sans serveur ne peut pas envoyer d'e-mails. Pour l'instant (`OTP.MODE = "demo"` dans `js/otp.js`), l'e-mail s'affiche dans une « boîte mail de démonstration » sur la page. Pour envoyer de vrais e-mails, il faudra un **serveur** (par exemple une fonction Vercel) et un **service d'envoi d'e-mails** (Brevo, Resend…), puis brancher la fonction `envoyerVraiEmail`. La clé secrète du service ne doit jamais être mise dans le code du site.
+
 ## La validation des comptes
 
 Tout nouveau compte, employeur ou demandeur, doit être **validé par un administrateur** avant de pouvoir agir.
@@ -98,8 +110,9 @@ C'est un site statique : il suffit de connecter ce dépôt à **Vercel**, sans r
 ```
 index.html      la page principale
 vercel.json     les en-têtes de sécurité pour Vercel
-css/style.css   les couleurs et le style (bleu, blanc, rouge)
+css/style.css   les couleurs et le style (bleu azur, blanc, rouge)
 js/db.js        la base de données SQLite embarquée
+js/otp.js       la vérification de l'e-mail par code (OTP)
 js/app.js       les pages et les actions
 vendor/         SQLite pour le navigateur (sql.js, licence MIT)
 ```
