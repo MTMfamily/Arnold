@@ -282,6 +282,7 @@ function appliquerReglages() {
   document.getElementById("lienTalents").textContent = t("Talents");
   document.getElementById("piedSlogan").textContent = t("« le travail » en lingala · Le réseau pro de la RDC");
   document.getElementById("piedProjet").textContent = t("Projet d'Arnold · Code en Famille");
+  document.getElementById("boutonInstaller").textContent = t("📲 Installer Musala");
   const bandeau = document.getElementById("bandeauLangue");
   bandeau.hidden = langue === "fr";
   bandeau.textContent = langue === "fr" ? "" : t("🗣️ Traduction en cours de vérification : aide-nous à la corriger !");
@@ -337,7 +338,52 @@ function enregistrerHorsLigne() {
     .catch((err) => console.warn("Mode hors ligne indisponible", err));
 }
 
-window.addEventListener("offline", () => toast("Tu n'es pas connecté à Internet : tu vois la dernière version enregistrée."));
+// Installer Musala comme une application (icône sur l'écran d'accueil).
+// Le navigateur propose l'installation seulement quand c'est possible : le bouton n'apparaît qu'à ce moment-là.
+let invitationInstallation = null;
+
+window.addEventListener("beforeinstallprompt", (ev) => {
+  ev.preventDefault();
+  invitationInstallation = ev;
+  document.getElementById("boutonInstaller").hidden = false;
+});
+
+window.addEventListener("appinstalled", () => {
+  invitationInstallation = null;
+  document.getElementById("boutonInstaller").hidden = true;
+  toast("Musala est installé sur ton téléphone 🎉");
+});
+
+document.getElementById("boutonInstaller").addEventListener("click", async () => {
+  if (!invitationInstallation) return;
+  invitationInstallation.prompt();
+  await invitationInstallation.userChoice;
+  invitationInstallation = null;
+  document.getElementById("boutonInstaller").hidden = true;
+});
+
+// Texte envoyé quand on partage une offre (WhatsApp ou autre application).
+function texteOffre(o) {
+  const lien = `${location.origin}${location.pathname}#/offre/${o.id}`;
+  return [
+    `💼 ${o.titre}`,
+    `🏢 ${o.entreprise} · 📍 ${o.ville}`,
+    o.salaire ? `💰 ${o.salaire}` : "",
+    t("Postule sur Musala, le réseau pro de la RDC : {lien}", { lien }),
+  ].filter(Boolean).join("\n");
+}
+
+function blocPartage(o) {
+  const whatsapp = `https://wa.me/?text=${encodeURIComponent(texteOffre(o))}`;
+  return `
+    <div class="partage">
+      <span class="sous">${t("Partager cette offre")} :</span>
+      <a class="btn btn-petit btn-whatsapp" href="${e(whatsapp)}" target="_blank" rel="noopener noreferrer">${t("💬 Partager sur WhatsApp")}</a>
+      ${navigator.share ? `<button type="button" class="btn btn-petit btn-blanc" data-action="partager" data-offre="${o.id}">${t("📤 Partager…")}</button>` : ""}
+    </div>`;
+}
+
+window.addEventListener("offline", () =>toast("Tu n'es pas connecté à Internet : tu vois la dernière version enregistrée."));
 window.addEventListener("load", () => setTimeout(afficherCompteur, 500));
 
 document.getElementById("choixLangue").addEventListener("change", (ev) => {
@@ -501,6 +547,7 @@ const pages = {
         <p class="description">${e(o.description)}</p>
         ${o.competences ? `<h3>${t("Compétences recherchées")}</h3><div class="tags">${tags(o.competences)}</div>` : ""}
         ${o.desc_entreprise ? `<h3>${e(t("À propos de {nom}", { nom: o.entreprise }))}</h3><p>${e(o.desc_entreprise)}</p>` : ""}
+        ${o.statut_compte === "valide" && o.active ? blocPartage(o) : ""}
         <hr style="border:0;border-top:1px solid var(--bord);margin:24px 0">
         ${action}
       </div>`;
@@ -1485,6 +1532,11 @@ document.addEventListener("click", (ev) => {
   const cible = ev.target.closest("[data-action], [data-basculer]");
   if (!cible) return;
   if (cible.dataset.action === "deconnexion") deconnecter();
+  if (cible.dataset.action === "partager") {
+    const o = DB.un(`${REQ_OFFRES} AND o.id = ?`, [Number(cible.dataset.offre)]);
+    // Si la personne ferme la fenêtre de partage, ce n'est pas une erreur.
+    if (o) navigator.share({ title: o.titre, text: texteOffre(o) }).catch(() => {});
+  }
   if (cible.dataset.action === "otp-recommencer") {
     ev.preventDefault();
     OTP.reinitialiser();

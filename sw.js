@@ -3,7 +3,7 @@
 // Visites suivantes : Musala s'ouvre depuis cette mémoire (0 Ko), même sans Internet,
 // puis vérifie discrètement s'il existe une nouvelle version, utilisée à la visite suivante.
 
-const VERSION = "musala-v1";
+const VERSION = "musala-v2";
 const FICHIERS = [
   "./",
   "index.html",
@@ -14,6 +14,10 @@ const FICHIERS = [
   "js/app.js",
   "vendor/sql-wasm.js",
   "vendor/sql-wasm.wasm",
+  "manifest.webmanifest",
+  "icones/icone-192.png",
+  "icones/icone-512.png",
+  "icones/icone-masquable-512.png",
 ];
 
 self.addEventListener("install", (ev) => {

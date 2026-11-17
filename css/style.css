@@ -13,6 +13,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Un élément marqué « hidden » reste caché, même si une autre règle lui donne un affichage. */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -298,3 +300,9 @@ html.leger .stat { padding: 10px; }
 html.leger .avatar { background: var(--bleu); }
 html.leger .btn:hover, html.leger .carte-lien:hover { transform: none; }
 .toast { border-radius: 16px; text-align: center; width: max-content; max-width: calc(100% - 32px); }
+
+/* ---------- Partage d'une offre ---------- */
+.partage { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 20px; }
+.btn-whatsapp { background: #128c7e; }
+.btn-whatsapp:hover { box-shadow: 0 6px 16px rgba(18, 140, 126, .3); }
+.partage .sous { margin: 0; }

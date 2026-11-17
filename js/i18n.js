@@ -440,6 +440,19 @@ const TRADUCTIONS = {
     "Mbote,\n\nKode na nge sambu na kusala kɔnti ya Musala yai : {code}\n\nYo ke sala sambu na minuti 10. Kupesa yo na muntu ve : ekipi ya Musala ta lomba nge yo ata fioti ve.\n\nKana nge lombaka ve kode yai, bika e-mail yai.\n\nEkipi ya Musala",
   ],
 
+  // ---------- Partage et installation ----------
+  "Partager cette offre": ["Kabolá mosala oyo", "Shiriki nafasi hii", "Abanya mudimu eu", "Kabula kisalu yai"],
+  "💬 Partager sur WhatsApp": ["💬 Kabolá na WhatsApp", "💬 Shiriki kwenye WhatsApp", "💬 Abanya ku WhatsApp", "💬 Kabula na WhatsApp"],
+  "📤 Partager…": ["📤 Kabolá…", "📤 Shiriki…", "📤 Abanya…", "📤 Kabula…"],
+  "Postule sur Musala, le réseau pro de la RDC : {lien}": [
+    "Tinda mokanda na Musala, réseau ya misala ya RDC : {lien}",
+    "Omba kazi kwenye Musala, mtandao wa kazi wa RDC : {lien}",
+    "Lomba mudimu ku Musala, tshisangilu tsha midimu tsha RDC : {lien}",
+    "Lomba kisalu na Musala, réseau ya bisalu ya RDC : {lien}",
+  ],
+  "📲 Installer Musala": ["📲 Tia Musala na telefone", "📲 Sakinisha Musala", "📲 Teka Musala mu telefone", "📲 Tula Musala na telefone"],
+  "Musala est installé sur ton téléphone 🎉": ["Musala ezali sikoyo na telefone na yo 🎉", "Musala imesakinishwa kwenye simu yako 🎉", "Musala mmuteka mu telefone webe 🎉", "Musala kele sesepi na telefone na nge 🎉"],
+
   // ---------- Mode léger ----------
   "📶 Mode léger activé · Cette visite a utilisé {ko} Ko d'Internet.": [
     "📶 Mode ya pete ezali · Botali oyo esaleli {ko} Ko ya Internet.",

@@ -75,6 +75,13 @@ Pour économiser les données mobiles, qui coûtent cher :
 - Le bouton **📶** active le **mode léger** : pas d'effets visuels (dégradés, ombres, animations), des listes plus courtes (6 éléments, puis « Voir plus »), et un **compteur** en bas de page qui montre ce que la visite a consommé.
 - Le mode léger s'active **tout seul** si le téléphone est réglé en « économie de données ».
 
+## Partager et installer 📲
+
+- **Partager une offre** : sur chaque offre, un bouton **« Partager sur WhatsApp »** prépare un message avec le poste, l'entreprise, la ville, le salaire et le lien, dans la langue choisie. Sur téléphone, le bouton **« Partager… »** ouvre aussi la fenêtre de partage habituelle (SMS, Facebook, Telegram…).
+- **Installer Musala** comme une application : quand le navigateur le permet, un bouton **« 📲 Installer Musala »** apparaît en bas de page. Musala a alors son icône sur l'écran d'accueil et s'ouvre en plein écran, même sans Internet. Les icônes sont dans `icones/` et la carte d'identité de l'application dans `manifest.webmanifest`.
+
+> ⚠️ Tant que Musala n'a pas de serveur, une offre créée sur un téléphone n'existe que sur ce téléphone : la personne qui reçoit le lien voit le message WhatsApp, mais pas forcément l'offre sur le site.
+
 ## La base de données embarquée
 
 Musala utilise **SQLite** directement dans le navigateur, grâce à [sql.js](https://github.com/sql-js/sql.js) (fichiers dans `vendor/`).
@@ -133,6 +140,8 @@ js/db.js        la base de données SQLite embarquée
 js/otp.js       la vérification de l'e-mail par code (OTP)
 js/i18n.js      les traductions (français, lingala, swahili, tshiluba, kikongo)
 sw.js           garde Musala dans le téléphone (mode hors ligne)
+manifest.webmanifest  la carte d'identité de l'application (nom, couleurs, icônes)
+icones/         les icônes de l'application
 js/app.js       les pages et les actions
 vendor/         SQLite pour le navigateur (sql.js, licence MIT)
 ```
