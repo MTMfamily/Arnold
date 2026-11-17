@@ -4,6 +4,9 @@
 const VILLES = ["Kinshasa", "Lubumbashi", "Goma", "Bukavu", "Kisangani", "Mbuji-Mayi", "Kananga", "Matadi", "Kolwezi", "Bunia", "Mbandaka", "Kikwit"];
 const SECTEURS = ["Informatique & Tech", "Mines", "Agriculture", "Santé", "Éducation", "Commerce", "BTP", "Banque & Finance", "Télécoms", "ONG & Humanitaire", "Transport & Logistique", "Hôtellerie"];
 const CONTRATS = ["CDI", "CDD", "Stage", "Freelance", "Temps partiel"];
+const NIVEAUX = ["Sans diplôme", "Certificat d'études primaires", "Diplôme d'État", "Formation professionnelle", "Graduat", "Licence", "Master", "Doctorat"];
+const PIECES = ["Carte d'électeur", "Passeport", "Permis de conduire"];
+const AGE_MINIMUM = 18;
 const STATUTS = {
   envoyee: "Envoyée",
   vue: "Vue",
@@ -13,8 +16,8 @@ const STATUTS = {
 };
 const SESSION_KEY = "musala_session";
 
-// Critères qu'un employeur doit remplir pour être validé par l'administrateur.
-const CRITERES = [
+// Critères qu'un employeur doit remplir pour être validé.
+const CRITERES_EMPLOYEUR = [
   { cle: "rccm", texte: "Entreprise immatriculée au RCCM (numéro valide)" },
   { cle: "id_nat", texte: "Numéro d'identification nationale (Id. Nat.)" },
   { cle: "nif", texte: "Numéro d'impôt (NIF)" },
@@ -23,11 +26,28 @@ const CRITERES = [
   { cle: "contact", texte: "Téléphone et e-mail joignables" },
 ];
 
+// Critères qu'un demandeur d'emploi doit remplir pour être validé.
+const CRITERES_DEMANDEUR = [
+  { cle: "identite", texte: "Nom complet identique à celui de la pièce d'identité" },
+  { cle: "age", texte: `Avoir au moins ${AGE_MINIMUM} ans (date de naissance)` },
+  { cle: "piece", texte: "Pièce d'identité valide : carte d'électeur, passeport ou permis de conduire" },
+  { cle: "adresse", texte: "Adresse de résidence en RDC" },
+  { cle: "etudes", texte: "Niveau d'études renseigné" },
+  { cle: "profil", texte: "Métier recherché et au moins une compétence" },
+  { cle: "contact", texte: "Téléphone et e-mail joignables" },
+];
+
 const STATUTS_COMPTE = {
   en_attente: "En attente de validation",
   valide: "Validé",
   refuse: "Refusé",
   suspendu: "Suspendu",
+};
+
+// Les deux administrateurs : chacun ne traite que les dossiers de « sa » catégorie.
+const ADMINS = {
+  admin_employeurs: { cible: "employeur", titre: "Administration des employeurs", pluriel: "employeurs", criteres: CRITERES_EMPLOYEUR },
+  admin_demandeurs: { cible: "demandeur", titre: "Administration des demandeurs", pluriel: "demandeurs", criteres: CRITERES_DEMANDEUR },
 };
 
 const app = document.getElementById("app");
@@ -68,6 +88,31 @@ function depuis(date) {
   return `il y a ${jours} jours`;
 }
 
+// Âge en années à partir d'une date "AAAA-MM-JJ" ; null si la date est invalide.
+function age(date) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ""));
+  if (!m) return null;
+  const naissance = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (naissance.getMonth() !== Number(m[2]) - 1) return null;
+  const auj = new Date();
+  let ans = auj.getFullYear() - naissance.getFullYear();
+  if (auj < new Date(auj.getFullYear(), naissance.getMonth(), naissance.getDate())) ans--;
+  return ans;
+}
+
+function chiffres(texte) {
+  return String(texte || "").replace(/\D/g, "");
+}
+
+function normaliser(texte) {
+  return String(texte || "").toUpperCase().replace(/[\s-]/g, "");
+}
+
+function dateFr(date) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ""));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : "—";
+}
+
 function toast(message) {
   const t = document.getElementById("toast");
   t.textContent = message;
@@ -80,6 +125,10 @@ function aller(route) {
   if (location.hash === route) afficher();
   else location.hash = route;
 }
+
+// Marque un champ obligatoire (le code vérifie aussi ces champs à l'envoi).
+const OBL = ' <span class="obligatoire" aria-hidden="true">*</span>';
+const NOTE_OBL = '<p class="sous"><span class="obligatoire">*</span> Champ obligatoire</p>';
 
 function donneesForm(form) {
   return Object.fromEntries(new FormData(form).entries());
@@ -128,30 +177,34 @@ function prolongerSession() {
   if (s && s.expire >= Date.now()) ecrireSession(s.id);
 }
 
+function estAdmin(u) {
+  return !!u && Object.hasOwn(ADMINS, u.role);
+}
+
+function estValide(u, role) {
+  return !!u && u.role === role && u.statut_compte === "valide";
+}
+
 // Renvoie l'utilisateur connecté s'il a le bon rôle, sinon l'envoie se connecter.
 function exiger(role) {
   const moi = utilisateur();
   if (moi && moi.role === role) return moi;
-  const noms = { employeur: "Réservé aux employeurs.", demandeur: "Réservé aux demandeurs d'emploi.", admin: "Réservé à l'administrateur." };
-  toast(noms[role]);
+  const noms = { employeur: "Réservé aux employeurs.", demandeur: "Réservé aux demandeurs d'emploi." };
+  toast(noms[role] || "Accès refusé.");
   aller("#/connexion");
   return null;
 }
 
-// Un employeur ne peut recruter qu'une fois son compte validé par l'administrateur.
-function exigerEmployeurValide() {
-  const moi = exiger("employeur");
+// Employeurs et demandeurs ne peuvent agir qu'une fois leur dossier validé par un administrateur.
+function exigerValide(role) {
+  const moi = exiger(role);
   if (!moi) return null;
   if (moi.statut_compte !== "valide") {
-    toast("Ton compte employeur doit d'abord être validé par l'administrateur.");
+    toast("Ton dossier doit d'abord être validé par un administrateur.");
     aller("#/espace");
     return null;
   }
   return moi;
-}
-
-function estEmployeurValide(u) {
-  return !!u && u.role === "employeur" && u.statut_compte === "valide";
 }
 
 function connecter(id) {
@@ -167,8 +220,8 @@ function deconnecter() {
 function majNav() {
   const moi = utilisateur();
   let lienEspace = '<a href="#/espace">Mon espace</a>';
-  if (moi && moi.role === "admin") {
-    const n = DB.un("SELECT COUNT(*) AS n FROM users WHERE role = 'employeur' AND statut_compte = 'en_attente'").n;
+  if (estAdmin(moi)) {
+    const n = DB.un("SELECT COUNT(*) AS n FROM users WHERE role = ? AND statut_compte = 'en_attente'", [ADMINS[moi.role].cible]).n;
     lienEspace = `<a href="#/espace">Administration${n ? ` <span class="pastille">${n}</span>` : ""}</a>`;
   }
   document.getElementById("navUser").innerHTML = moi
@@ -199,7 +252,7 @@ function carteTalent(t) {
       <div class="ligne">
         <div class="avatar">${initiales(t.nom)}</div>
         <div>
-          <h3>${e(t.nom)}</h3>
+          <h3>${e(t.nom)} <span class="verifie" title="Profil vérifié par Musala">✔</span></h3>
           <p class="sous" style="margin:0">${e(t.titre || "Membre Musala")} · ${e(t.ville)}</p>
         </div>
       </div>
@@ -213,17 +266,18 @@ const REQ_OFFRES = `
   JOIN users u ON u.id = o.employeur_id
   WHERE o.active = 1 AND u.statut_compte = 'valide'`;
 
+// Seuls les demandeurs validés apparaissent dans les talents.
 const REQ_TALENTS = `
   SELECT u.id, u.nom, u.ville, p.titre, p.competences, p.bio FROM users u
   JOIN profils p ON p.user_id = u.id
-  WHERE u.role = 'demandeur'`;
+  WHERE u.role = 'demandeur' AND u.statut_compte = 'valide'`;
 
 // ---------- Pages ----------
 
 const pages = {
   accueil() {
     const nbOffres = DB.un(`SELECT COUNT(*) AS n FROM (${REQ_OFFRES})`).n;
-    const nbTalents = DB.un("SELECT COUNT(*) AS n FROM users WHERE role = 'demandeur'").n;
+    const nbTalents = DB.un(`SELECT COUNT(*) AS n FROM (${REQ_TALENTS})`).n;
     const nbEntreprises = DB.un("SELECT COUNT(*) AS n FROM users WHERE role = 'employeur' AND statut_compte = 'valide'").n;
     const recentes = DB.tous(REQ_OFFRES + " ORDER BY o.cree_le DESC, o.id DESC LIMIT 3");
     return `
@@ -243,7 +297,7 @@ const pages = {
 
       <section class="stats">
         <div class="stat"><b>${nbOffres}</b><span>offres d'emploi</span></div>
-        <div class="stat"><b>${nbTalents}</b><span>talents inscrits</span></div>
+        <div class="stat"><b>${nbTalents}</b><span>talents vérifiés</span></div>
         <div class="stat"><b>${nbEntreprises}</b><span>employeurs vérifiés</span></div>
       </section>
 
@@ -284,18 +338,20 @@ const pages = {
       JOIN users u ON u.id = o.employeur_id LEFT JOIN entreprises en ON en.user_id = u.id WHERE o.id = ?`, [Number(id)]);
     if (!o) return pages.introuvable();
     const moi = utilisateur();
-    // L'offre d'un employeur non validé (ou suspendu) reste cachée, sauf pour lui et l'administrateur.
-    const visible = o.statut_compte === "valide" || (moi && (moi.id === o.employeur_id || moi.role === "admin"));
+    // L'offre d'un employeur non validé (ou suspendu) reste cachée, sauf pour lui et l'admin des employeurs.
+    const visible = o.statut_compte === "valide" || (moi && (moi.id === o.employeur_id || moi.role === "admin_employeurs"));
     if (!visible) return pages.introuvable();
     let action = `<a class="btn btn-rouge" href="#/connexion?retour=${encodeURIComponent("#/offre/" + o.id)}">Se connecter pour postuler</a>`;
     if (o.statut_compte !== "valide") {
       action = `<p class="sous">🔒 Cette offre n'est pas visible du public : le compte de l'employeur n'est pas validé.</p>`;
-    } else if (moi && moi.role === "admin") {
+    } else if (estAdmin(moi)) {
       action = `<p class="sous">Tu es connecté en administrateur.</p>`;
     } else if (moi && moi.role === "employeur") {
       action = moi.id === o.employeur_id
         ? `<a class="btn" href="#/espace/candidats/${o.id}">Voir les candidats</a>`
         : `<p class="sous">Connecte-toi avec un compte demandeur pour postuler.</p>`;
+    } else if (moi && moi.statut_compte !== "valide") {
+      action = `<p>🔒 Ton dossier doit être validé par un administrateur avant de pouvoir postuler. <a href="#/espace">Voir mon dossier</a></p>`;
     } else if (moi) {
       const deja = DB.un("SELECT statut FROM candidatures WHERE offre_id = ? AND demandeur_id = ?", [o.id, moi.id]);
       action = deja
@@ -337,7 +393,7 @@ const pages = {
     if (ville) { req += " AND u.ville = ?"; p.push(ville); }
     const liste = DB.tous(req + " ORDER BY u.id DESC", p);
     return `
-      <div class="page-titre"><h1>Talents</h1><span class="sous">${liste.length} profil(s)</span></div>
+      <div class="page-titre"><h1>Talents</h1><span class="sous">${liste.length} profil(s) vérifié(s)</span></div>
       <form class="filtres" data-form="filtres-talents">
         <input name="q" placeholder="Nom, métier, compétence…" value="${e(q)}">
         <select name="ville">${options(VILLES, ville, "Toutes les villes")}</select>
@@ -351,16 +407,21 @@ const pages = {
       WHERE u.id = ? AND u.role = 'demandeur'`, [Number(id)]);
     if (!t) return pages.introuvable();
     const moi = utilisateur();
-    const contact = estEmployeurValide(moi) || (moi && moi.role === "admin")
+    // Un profil non validé n'est visible que par son propriétaire et l'admin des demandeurs.
+    const visible = t.statut_compte === "valide" || (moi && (moi.id === t.id || moi.role === "admin_demandeurs"));
+    if (!visible) return pages.introuvable();
+    const voitContact = estValide(moi, "employeur") || (moi && (moi.id === t.id || moi.role === "admin_demandeurs"));
+    const contact = voitContact
       ? `<p>📧 <a href="mailto:${e(t.email)}">${e(t.email)}</a>${t.telephone ? ` · 📞 ${e(t.telephone)}` : ""}</p>`
       : `<p class="sous">Les coordonnées sont visibles uniquement par les employeurs vérifiés.</p>`;
     return `
       <div class="detail carte">
         <a href="#/talents">← Tous les talents</a>
+        ${t.statut_compte !== "valide" ? `<div class="bandeau bandeau-en_attente">🔒 Ce profil n'est pas encore visible du public (${e(STATUTS_COMPTE[t.statut_compte].toLowerCase())}).</div>` : ""}
         <div class="ligne" style="margin-top:16px">
           <div class="avatar avatar-grand">${initiales(t.nom)}</div>
           <div>
-            <h1 style="margin:0">${e(t.nom)}</h1>
+            <h1 style="margin:0">${e(t.nom)}${t.statut_compte === "valide" ? ' <span class="verifie" title="Profil vérifié par Musala">✔ Vérifié</span>' : ""}</h1>
             <p class="sous" style="margin:0">${e(t.titre || "Membre Musala")} · ${e(t.ville)}</p>
             ${t.disponible ? '<span class="tag">🟢 Disponible</span>' : ""}
           </div>
@@ -384,7 +445,8 @@ const pages = {
         <input id="mdp" name="mdp" type="password" required autocomplete="current-password">
         <button class="btn">Se connecter</button>
         <p style="text-align:center">Pas encore de compte ? <a href="#/inscription">Inscris-toi</a></p>
-        <div class="astuce">💡 Pour tester : <b>grace@exemple.cd</b> (demandeuse), <b>contact@kindigital.cd</b> (employeur validé) ou <b>rh@congobatiment.cd</b> (employeur en attente), mot de passe <b>musala123</b>. Administrateur : <b>admin@musala.cd</b> / <b>admin-musala</b>.</div>
+        <div class="astuce">💡 Comptes de test (mot de passe <b>musala123</b>) : <b>grace@exemple.cd</b> (demandeuse validée), <b>merveille@exemple.cd</b> (demandeuse en attente), <b>contact@kindigital.cd</b> (employeur validé), <b>rh@congobatiment.cd</b> (employeur en attente).
+          <br>Administrateurs : <b>admin.employeurs@musala.cd</b> / <b>admin-employeurs</b> et <b>admin.demandeurs@musala.cd</b> / <b>admin-demandeurs</b>.</div>
         <div class="astuce">🔒 Sur un ordinateur partagé (cybercafé, école), pense à cliquer sur <b>Déconnexion</b> en partant. Par sécurité, Musala te déconnecte aussi après 30 minutes sans activité.</div>
       </form>`;
   },
@@ -394,33 +456,41 @@ const pages = {
     return `
       <form class="form carte" data-form="inscription">
         <h1>Rejoins Musala</h1>
+        ${NOTE_OBL}
         <label>Je suis…</label>
         <div class="choix-role">
           <label><input type="radio" name="role" value="demandeur" ${role === "demandeur" ? "checked" : ""}><span>👤 Demandeur d'emploi</span><small>Je cherche un travail</small></label>
           <label><input type="radio" name="role" value="employeur" ${role === "employeur" ? "checked" : ""}><span>🏢 Employeur</span><small>Je recrute</small></label>
         </div>
-        <label for="nom">Nom complet ou nom de l'entreprise</label>
-        <input id="nom" name="nom" required>
+        <label for="nom">Nom complet (comme sur ta pièce d'identité) ou nom de l'entreprise${OBL}</label>
+        <input id="nom" name="nom" required maxlength="100">
         <div class="deux-col">
           <div>
-            <label for="ville">Ville</label>
-            <select id="ville" name="ville">${options(VILLES, "Kinshasa")}</select>
+            <label for="ville">Ville${OBL}</label>
+            <select id="ville" name="ville" required>${options(VILLES, "Kinshasa")}</select>
           </div>
           <div>
-            <label for="telephone">Téléphone</label>
-            <input id="telephone" name="telephone" placeholder="+243…">
+            <label for="telephone">Téléphone${OBL}</label>
+            <input id="telephone" name="telephone" placeholder="+243…" required>
           </div>
         </div>
-        <label for="email">E-mail</label>
+        <label for="email">E-mail${OBL}</label>
         <input id="email" name="email" type="email" required autocomplete="email">
-        <label for="mdp">Mot de passe (8 caractères minimum)</label>
+        <label for="mdp">Mot de passe (8 caractères minimum)${OBL}</label>
         <input id="mdp" name="mdp" type="password" minlength="8" required autocomplete="new-password">
-        <div id="champsEmployeur" ${role === "employeur" ? "" : "hidden"}>
-          <h3 style="margin-top:24px">🏢 Dossier de vérification</h3>
-          ${blocCriteres()}
-          ${champsDossier({})}
-        </div>
-        <button class="btn btn-rouge">Créer mon compte</button>
+
+        <fieldset class="bloc-role" id="champsDemandeur" ${role === "demandeur" ? "" : "hidden disabled"}>
+          <h3>👤 Dossier de vérification</h3>
+          ${blocCriteres("demandeur")}
+          ${champsDemandeur({}, "d-")}
+        </fieldset>
+        <fieldset class="bloc-role" id="champsEmployeur" ${role === "employeur" ? "" : "hidden disabled"}>
+          <h3>🏢 Dossier de vérification</h3>
+          ${blocCriteres("employeur")}
+          ${champsEmployeur({}, "e-")}
+        </fieldset>
+
+        <button class="btn btn-rouge">Créer mon compte et envoyer mon dossier</button>
         <p style="text-align:center">Déjà inscrit ? <a href="#/connexion">Connecte-toi</a></p>
       </form>`;
   },
@@ -428,12 +498,12 @@ const pages = {
   espace(params) {
     const moi = utilisateur();
     if (!moi) { aller("#/connexion"); return ""; }
-    if (moi.role === "admin") return espaceAdmin(moi, params);
+    if (estAdmin(moi)) return espaceAdmin(moi, params);
     return moi.role === "employeur" ? espaceEmployeur(moi) : espaceDemandeur(moi);
   },
 
   nouvelleOffre() {
-    const moi = exigerEmployeurValide();
+    const moi = exigerValide("employeur");
     if (!moi) return "";
     return `
       <form class="form carte" data-form="offre">
@@ -456,7 +526,7 @@ const pages = {
   },
 
   candidats(params, id) {
-    const moi = exigerEmployeurValide();
+    const moi = exigerValide("employeur");
     if (!moi) return "";
     const o = DB.un("SELECT * FROM offres WHERE id = ? AND employeur_id = ?", [Number(id), moi.id]);
     if (!o) return pages.introuvable();
@@ -482,32 +552,53 @@ const pages = {
   },
 };
 
-// ---------- Dossier de vérification des employeurs ----------
+// ---------- Dossiers de vérification ----------
 
-function blocCriteres() {
-  return `
-    <div class="astuce">
-      Pour protéger les demandeurs contre les fausses offres, chaque employeur est vérifié par un administrateur avant de pouvoir recruter. Il faut :
-      <ul class="criteres">${CRITERES.map((c) => `<li>${e(c.texte)}</li>`).join("")}</ul>
-    </div>`;
+function blocCriteres(role) {
+  const intro = role === "employeur"
+    ? "Pour protéger les demandeurs contre les fausses offres, chaque employeur est vérifié par un administrateur avant de pouvoir recruter. Il faut :"
+    : "Pour garantir des profils sérieux aux employeurs, chaque demandeur est vérifié par un administrateur avant de pouvoir postuler. Il faut :";
+  const criteres = role === "employeur" ? CRITERES_EMPLOYEUR : CRITERES_DEMANDEUR;
+  return `<div class="astuce">${intro}<ul class="criteres">${criteres.map((c) => `<li>${e(c.texte)}</li>`).join("")}</ul></div>`;
 }
 
-function champsDossier(v) {
+// p : préfixe des identifiants, pour pouvoir afficher deux dossiers sur la même page.
+function champsEmployeur(v, p = "") {
   return `
     <div class="deux-col">
-      <div><label for="secteur">Secteur</label><select id="secteur" name="secteur">${options(SECTEURS, v.secteur, "Choisir…")}</select></div>
-      <div><label for="rccm">N° RCCM</label><input id="rccm" name="rccm" value="${e(v.rccm)}" maxlength="60" placeholder="Ex : CD/KIN/RCCM/24-B-01234"></div>
-      <div><label for="id_nat">N° Id. Nat.</label><input id="id_nat" name="id_nat" value="${e(v.id_nat)}" maxlength="60"></div>
-      <div><label for="nif">N° Impôt (NIF)</label><input id="nif" name="nif" value="${e(v.nif)}" maxlength="60"></div>
-      <div><label for="responsable">Nom du responsable</label><input id="responsable" name="responsable" value="${e(v.responsable)}" maxlength="100"></div>
-      <div><label for="fonction_responsable">Sa fonction</label><input id="fonction_responsable" name="fonction_responsable" value="${e(v.fonction_responsable)}" maxlength="100" placeholder="Ex : Directeur RH"></div>
+      <div><label for="${p}secteur">Secteur${OBL}</label><select required id="${p}secteur" name="secteur">${options(SECTEURS, v.secteur, "Choisir…")}</select></div>
+      <div><label for="${p}rccm">N° RCCM${OBL}</label><input required id="${p}rccm" name="rccm" value="${e(v.rccm)}" maxlength="60" placeholder="Ex : CD/KIN/RCCM/24-B-01234"></div>
+      <div><label for="${p}id_nat">N° Id. Nat.${OBL}</label><input required id="${p}id_nat" name="id_nat" value="${e(v.id_nat)}" maxlength="60"></div>
+      <div><label for="${p}nif">N° Impôt (NIF)${OBL}</label><input required id="${p}nif" name="nif" value="${e(v.nif)}" maxlength="60"></div>
+      <div><label for="${p}responsable">Nom du responsable${OBL}</label><input required id="${p}responsable" name="responsable" value="${e(v.responsable)}" maxlength="100"></div>
+      <div><label for="${p}fonction_responsable">Sa fonction${OBL}</label><input required id="${p}fonction_responsable" name="fonction_responsable" value="${e(v.fonction_responsable)}" maxlength="100" placeholder="Ex : Directeur RH"></div>
     </div>
-    <label for="adresse">Adresse du siège</label>
-    <input id="adresse" name="adresse" value="${e(v.adresse)}" maxlength="200" placeholder="N°, avenue, commune, ville">`;
+    <label for="${p}adresse">Adresse du siège${OBL}</label>
+    <input required id="${p}adresse" name="adresse" value="${e(v.adresse)}" maxlength="200" placeholder="N°, avenue, commune, ville">`;
+}
+
+function champsDemandeur(v, p = "") {
+  return `
+    <div class="deux-col">
+      <div><label for="${p}date_naissance">Date de naissance${OBL}</label><input required id="${p}date_naissance" name="date_naissance" type="date" value="${e(v.date_naissance)}"></div>
+      <div><label for="${p}niveau_etudes">Niveau d'études${OBL}</label><select required id="${p}niveau_etudes" name="niveau_etudes">${options(NIVEAUX, v.niveau_etudes, "Choisir…")}</select></div>
+      <div><label for="${p}type_piece">Pièce d'identité${OBL}</label><select required id="${p}type_piece" name="type_piece">${options(PIECES, v.type_piece, "Choisir…")}</select></div>
+      <div><label for="${p}numero_piece">N° de la pièce${OBL}</label><input required id="${p}numero_piece" name="numero_piece" value="${e(v.numero_piece)}" maxlength="30"></div>
+    </div>
+    <label for="${p}adresse">Adresse de résidence${OBL}</label>
+    <input required id="${p}adresse" name="adresse" value="${e(v.adresse)}" maxlength="200" placeholder="N°, avenue, quartier, commune">
+    <label for="${p}titre">Métier recherché${OBL}</label>
+    <input required id="${p}titre" name="titre" value="${e(v.titre)}" maxlength="100" placeholder="Ex : Comptable">
+    <label for="${p}competences">Compétences (séparées par des virgules)${OBL}</label>
+    <input required id="${p}competences" name="competences" value="${e(v.competences)}" maxlength="300" placeholder="Ex : Excel, Anglais, Vente">`;
+}
+
+function erreurTelephone(telephone) {
+  return chiffres(telephone).length < 9 ? "Indique un numéro de téléphone joignable (au moins 9 chiffres)." : null;
 }
 
 // Vérifie le dossier envoyé ; renvoie un message d'erreur ou null.
-function erreurDossier(d, telephone) {
+function erreurDossierEmployeur(d) {
   if (!SECTEURS.includes(d.secteur)) return "Choisis le secteur de l'entreprise.";
   const champs = { rccm: "le n° RCCM", id_nat: "le n° Id. Nat.", nif: "le n° d'impôt (NIF)", adresse: "l'adresse du siège", responsable: "le nom du responsable", fonction_responsable: "la fonction du responsable" };
   for (const [cle, nom] of Object.entries(champs)) {
@@ -516,35 +607,121 @@ function erreurDossier(d, telephone) {
     if (valeur.length > 200) return `${nom[0].toUpperCase() + nom.slice(1)} est trop long.`;
   }
   if (!/RCCM/i.test(d.rccm)) return "Le n° RCCM doit contenir « RCCM » (ex : CD/KIN/RCCM/24-B-01234).";
-  if (String(telephone || "").replace(/\D/g, "").length < 9) return "Indique un numéro de téléphone joignable.";
-  return null;
+  return erreurTelephone(d.telephone);
 }
 
-function enregistrerDossier(userId, d) {
-  DB.executer(`UPDATE entreprises SET secteur = ?, rccm = ?, id_nat = ?, nif = ?, adresse = ?, responsable = ?, fonction_responsable = ?,
-    dossier_envoye_le = datetime('now'), motif = NULL, decide_le = NULL, decide_par = NULL WHERE user_id = ?`,
-    [d.secteur, ...["rccm", "id_nat", "nif", "adresse", "responsable", "fonction_responsable"].map((c) => String(d[c]).trim()), userId]);
-  DB.executer("UPDATE users SET statut_compte = 'en_attente' WHERE id = ?", [userId]);
+function erreurDossierDemandeur(d) {
+  const ans = age(d.date_naissance);
+  if (ans === null || ans > 100) return "Indique une date de naissance valide.";
+  if (ans < AGE_MINIMUM) return `Il faut avoir au moins ${AGE_MINIMUM} ans pour s'inscrire.`;
+  if (!PIECES.includes(d.type_piece)) return "Choisis le type de pièce d'identité.";
+  if (!/^[A-Za-z0-9 /-]{4,30}$/.test(String(d.numero_piece || "").trim())) return "Le n° de pièce doit faire 4 à 30 caractères (lettres, chiffres, tirets).";
+  if (String(d.adresse || "").trim().length < 5) return "Indique ton adresse de résidence.";
+  if (!NIVEAUX.includes(d.niveau_etudes)) return "Choisis ton niveau d'études.";
+  if (!String(d.titre || "").trim()) return "Indique le métier que tu recherches.";
+  if (!tags(d.competences)) return "Indique au moins une compétence.";
+  return erreurTelephone(d.telephone);
 }
 
-function bandeauStatut(moi, ent) {
+function erreurDossier(role, d) {
+  return role === "employeur" ? erreurDossierEmployeur(d) : erreurDossierDemandeur(d);
+}
+
+// Enregistre le dossier et le (re)met en attente de validation.
+function enregistrerDossier(role, userId, d) {
+  const t = (cle) => String(d[cle] || "").trim();
+  if (role === "employeur") {
+    DB.executer(`UPDATE entreprises SET secteur = ?, rccm = ?, id_nat = ?, nif = ?, adresse = ?, responsable = ?, fonction_responsable = ?
+      WHERE user_id = ?`, [d.secteur, t("rccm"), t("id_nat"), t("nif"), t("adresse"), t("responsable"), t("fonction_responsable"), userId]);
+  } else {
+    DB.executer(`UPDATE profils SET date_naissance = ?, type_piece = ?, numero_piece = ?, adresse = ?, niveau_etudes = ?, titre = ?, competences = ?
+      WHERE user_id = ?`, [d.date_naissance, d.type_piece, t("numero_piece").toUpperCase(), t("adresse"), d.niveau_etudes, t("titre"), t("competences"), userId]);
+  }
+  DB.executer(`UPDATE users SET statut_compte = 'en_attente', dossier_envoye_le = datetime('now'),
+    motif = NULL, decide_le = NULL, decide_par = NULL WHERE id = ?`, [userId]);
+}
+
+function bandeauStatut(moi) {
   const s = moi.statut_compte;
   if (s === "valide") return "";
+  const droits = moi.role === "employeur"
+    ? "Tu pourras publier des offres dès que ton compte sera validé."
+    : "Tu pourras postuler aux offres et apparaître dans les talents dès que ton dossier sera validé.";
   const textes = {
-    en_attente: "⏳ <b>Ton dossier est en cours de vérification.</b> Un administrateur va contrôler les informations de ton entreprise. Tu pourras publier des offres dès que ton compte sera validé.",
+    en_attente: `⏳ <b>Ton dossier est en cours de vérification.</b> Un administrateur va contrôler tes informations. ${droits}`,
     refuse: "❌ <b>Ton dossier a été refusé.</b> Corrige les informations ci-dessous puis renvoie-le.",
-    suspendu: "⛔ <b>Ton compte est suspendu.</b> Tes offres ne sont plus visibles. Contacte l'administrateur de Musala.",
+    suspendu: "⛔ <b>Ton compte est suspendu.</b> Contacte l'administrateur de Musala.",
   };
-  return `<div class="bandeau bandeau-${e(s)}">${textes[s] || ""}${ent.motif ? `<br>Motif : <i>${e(ent.motif)}</i>` : ""}</div>`;
+  return `<div class="bandeau bandeau-${e(s)}">${textes[s] || ""}${moi.motif ? `<br>Motif : <i>${e(moi.motif)}</i>` : ""}</div>`;
 }
+
+function enTeteEspace(moi, titre, bouton = "") {
+  const pastille = estAdmin(moi) ? "" : ` <span class="statut statut-compte-${e(moi.statut_compte)}">${e(STATUTS_COMPTE[moi.statut_compte])}</span>`;
+  return `
+    <div class="page-titre"><h1>${titre}${pastille}</h1>${bouton}</div>
+    ${estAdmin(moi) ? "" : bandeauStatut(moi)}`;
+}
+
+// Formulaire de dossier pour un compte pas encore validé (en attente, refusé ou suspendu).
+function formulaireDossier(moi, contenu) {
+  const modifiable = moi.statut_compte === "en_attente" || moi.statut_compte === "refuse";
+  return `
+    <h2 class="section">Mon dossier de vérification</h2>
+    <form class="carte" data-form="dossier">
+      <fieldset ${modifiable ? "" : "disabled"} class="bloc-role">
+        ${blocCriteres(moi.role)}
+        ${NOTE_OBL}
+        <div class="deux-col">
+          <div><label for="ville">Ville${OBL}</label><select id="ville" name="ville" required>${options(VILLES, moi.ville)}</select></div>
+          <div><label for="telephone">Téléphone${OBL}</label><input id="telephone" name="telephone" value="${e(moi.telephone)}" placeholder="+243…" required></div>
+        </div>
+        ${contenu}
+        ${modifiable ? `<button class="btn btn-rouge" style="margin-top:16px">${moi.statut_compte === "refuse" ? "Renvoyer mon dossier" : "Mettre à jour mon dossier"}</button>` : ""}
+      </fieldset>
+    </form>`;
+}
+
+function ficheEmployeur(ent) {
+  return fiche([
+    ["N° RCCM", ent.rccm], ["N° Id. Nat.", ent.id_nat], ["N° Impôt (NIF)", ent.nif],
+    ["Adresse du siège", ent.adresse], ["Responsable", [ent.responsable, ent.fonction_responsable].filter(Boolean).join(", ")],
+  ]);
+}
+
+function ficheDemandeur(p) {
+  const ans = age(p.date_naissance);
+  return fiche([
+    ["Date de naissance", `${dateFr(p.date_naissance)}${ans !== null ? ` (${ans} ans)` : ""}`],
+    ["Pièce d'identité", [p.type_piece, p.numero_piece].filter(Boolean).join(" n° ")],
+    ["Adresse", p.adresse], ["Niveau d'études", p.niveau_etudes],
+    ["Métier recherché", p.titre], ["Compétences", p.competences],
+  ]);
+}
+
+function fiche(lignes) {
+  return `<dl class="fiche">${lignes.map(([k, v]) => `<dt>${e(k)}</dt><dd>${e(v || "—")}</dd>`).join("")}</dl>`;
+}
+
+// ---------- Espaces personnels ----------
 
 function espaceDemandeur(moi) {
   const p = DB.un("SELECT * FROM profils WHERE user_id = ?", [moi.id]) || {};
+  const titre = `Bonjour ${e(moi.nom.split(" ")[0])} 👋`;
+
+  if (moi.statut_compte !== "valide") {
+    return enTeteEspace(moi, titre) + formulaireDossier(moi, `
+      ${champsDemandeur(p)}
+      <label for="bio">À propos de moi (facultatif)</label>
+      <textarea id="bio" name="bio" placeholder="Qui es-tu ? Qu'est-ce qui te motive ?">${e(p.bio)}</textarea>
+      <label for="experience">Expérience (facultatif)</label>
+      <textarea id="experience" name="experience" placeholder="Tes emplois, stages, projets…">${e(p.experience)}</textarea>`);
+  }
+
   const cands = DB.tous(`SELECT c.*, o.titre, o.ville, u.nom AS entreprise FROM candidatures c
     JOIN offres o ON o.id = c.offre_id JOIN users u ON u.id = o.employeur_id
     WHERE c.demandeur_id = ? ORDER BY c.cree_le DESC`, [moi.id]);
   return `
-    <div class="page-titre"><h1>Bonjour ${e(moi.nom.split(" ")[0])} 👋</h1><a class="btn" href="#/talent/${moi.id}">Voir mon profil public</a></div>
+    ${enTeteEspace(moi, titre, `<a class="btn" href="#/talent/${moi.id}">Voir mon profil public</a>`)}
 
     <h2 class="section">Mes candidatures</h2>
     <div class="carte table-scroll">
@@ -559,7 +736,7 @@ function espaceDemandeur(moi) {
         <div><label for="titre">Mon métier</label><input id="titre" name="titre" value="${e(p.titre)}" placeholder="Ex : Comptable"></div>
         <div><label for="ville">Ville</label><select id="ville" name="ville">${options(VILLES, moi.ville)}</select></div>
         <div><label for="telephone">Téléphone</label><input id="telephone" name="telephone" value="${e(moi.telephone)}"></div>
-        <div><label for="niveau_etudes">Études</label><input id="niveau_etudes" name="niveau_etudes" value="${e(p.niveau_etudes)}" placeholder="Ex : Licence en économie"></div>
+        <div><label for="niveau_etudes">Niveau d'études</label><select id="niveau_etudes" name="niveau_etudes">${options(NIVEAUX, p.niveau_etudes)}</select></div>
       </div>
       <label for="bio">À propos de moi</label>
       <textarea id="bio" name="bio" placeholder="Qui es-tu ? Qu'est-ce qui te motive ?">${e(p.bio)}</textarea>
@@ -567,44 +744,34 @@ function espaceDemandeur(moi) {
       <input id="competences" name="competences" value="${e(p.competences)}" placeholder="Ex : Excel, Anglais, Vente">
       <label for="experience">Expérience</label>
       <textarea id="experience" name="experience" placeholder="Tes emplois, stages, projets…">${e(p.experience)}</textarea>
-      <label><input type="checkbox" name="disponible" style="width:auto" ${p.disponible !== 0 ? "checked" : ""}> Je suis disponible pour un emploi</label>
+      <label class="coche"><input type="checkbox" name="disponible" ${p.disponible !== 0 ? "checked" : ""}> Je suis disponible pour un emploi</label>
       <button class="btn btn-rouge" style="margin-top:16px">Enregistrer mon profil</button>
-    </form>`;
+    </form>
+
+    <h2 class="section">Dossier vérifié ✔</h2>
+    <div class="carte">
+      ${ficheDemandeur(p)}
+      <p class="sous">Ton identité est vérifiée. Pour la modifier, contacte l'administrateur des demandeurs : elle sera vérifiée à nouveau.</p>
+    </div>`;
 }
 
 function espaceEmployeur(moi) {
   const ent = DB.un("SELECT * FROM entreprises WHERE user_id = ?", [moi.id]) || {};
-  const titre = `
-    <div class="page-titre">
-      <h1>${e(moi.nom)} 🏢 <span class="statut statut-compte-${e(moi.statut_compte)}">${e(STATUTS_COMPTE[moi.statut_compte])}</span></h1>
-      ${moi.statut_compte === "valide" ? '<a class="btn btn-rouge" href="#/espace/nouvelle-offre">+ Publier une offre</a>' : ""}
-    </div>
-    ${bandeauStatut(moi, ent)}`;
+  const titre = `${e(moi.nom)} 🏢`;
 
   if (moi.statut_compte !== "valide") {
-    const modifiable = moi.statut_compte === "en_attente" || moi.statut_compte === "refuse";
-    return `${titre}
-      <h2 class="section">Mon dossier de vérification</h2>
-      <form class="carte" data-form="dossier">
-        <fieldset ${modifiable ? "" : "disabled"} style="border:0;padding:0;margin:0">
-          ${blocCriteres()}
-          <div class="deux-col">
-            <div><label for="ville">Ville</label><select id="ville" name="ville">${options(VILLES, moi.ville)}</select></div>
-            <div><label for="telephone">Téléphone</label><input id="telephone" name="telephone" value="${e(moi.telephone)}" placeholder="+243…"></div>
-          </div>
-          ${champsDossier(ent)}
-          <label for="description">Présentation de l'entreprise</label>
-          <textarea id="description" name="description" placeholder="Que fait ton entreprise ?">${e(ent.description)}</textarea>
-          <label for="site">Site web (facultatif)</label>
-          <input id="site" name="site" value="${e(ent.site)}" placeholder="https://…">
-          ${modifiable ? `<button class="btn btn-rouge" style="margin-top:16px">${moi.statut_compte === "refuse" ? "Renvoyer mon dossier" : "Mettre à jour mon dossier"}</button>` : ""}
-        </fieldset>
-      </form>`;
+    return enTeteEspace(moi, titre) + formulaireDossier(moi, `
+      ${champsEmployeur(ent)}
+      <label for="description">Présentation de l'entreprise</label>
+      <textarea id="description" name="description" placeholder="Que fait ton entreprise ?">${e(ent.description)}</textarea>
+      <label for="site">Site web (facultatif)</label>
+      <input id="site" name="site" value="${e(ent.site)}" placeholder="https://…">`);
   }
 
   const offres = DB.tous(`SELECT o.*, (SELECT COUNT(*) FROM candidatures c WHERE c.offre_id = o.id) AS nb
     FROM offres o WHERE o.employeur_id = ? ORDER BY o.cree_le DESC, o.id DESC`, [moi.id]);
-  return `${titre}
+  return `
+    ${enTeteEspace(moi, titre, '<a class="btn btn-rouge" href="#/espace/nouvelle-offre">+ Publier une offre</a>')}
 
     <h2 class="section">Mes offres</h2>
     <div class="carte table-scroll">
@@ -622,11 +789,11 @@ function espaceEmployeur(moi) {
     <h2 class="section">Mon entreprise</h2>
     <form class="carte" data-form="entreprise">
       <div class="deux-col">
-        <div><label for="secteur">Secteur</label><select id="secteur" name="secteur">${options(SECTEURS, ent.secteur, "Choisir…")}</select></div>
         <div><label for="ville">Ville</label><select id="ville" name="ville">${options(VILLES, moi.ville)}</select></div>
         <div><label for="telephone">Téléphone</label><input id="telephone" name="telephone" value="${e(moi.telephone)}"></div>
-        <div><label for="site">Site web</label><input id="site" name="site" value="${e(ent.site)}" placeholder="https://…"></div>
       </div>
+      <label for="site">Site web</label>
+      <input id="site" name="site" value="${e(ent.site)}" placeholder="https://…">
       <label for="description">Présentation</label>
       <textarea id="description" name="description" placeholder="Que fait ton entreprise ?">${e(ent.description)}</textarea>
       <button class="btn btn-rouge" style="margin-top:16px">Enregistrer</button>
@@ -634,40 +801,64 @@ function espaceEmployeur(moi) {
 
     <h2 class="section">Dossier vérifié ✔</h2>
     <div class="carte">
-      ${ficheDossier(ent)}
-      <p class="sous">Pour modifier ces informations, contacte l'administrateur de Musala : elles seront vérifiées à nouveau.</p>
+      <p><b>Secteur :</b> ${e(ent.secteur || "—")}</p>
+      ${ficheEmployeur(ent)}
+      <p class="sous">Pour modifier ces informations, contacte l'administrateur des employeurs : elles seront vérifiées à nouveau.</p>
     </div>`;
-}
-
-function ficheDossier(ent) {
-  const lignes = [
-    ["N° RCCM", ent.rccm], ["N° Id. Nat.", ent.id_nat], ["N° Impôt (NIF)", ent.nif],
-    ["Adresse du siège", ent.adresse], ["Responsable", [ent.responsable, ent.fonction_responsable].filter(Boolean).join(", ")],
-  ];
-  return `<dl class="fiche">${lignes.map(([k, v]) => `<dt>${e(k)}</dt><dd>${e(v || "—")}</dd>`).join("")}</dl>`;
 }
 
 // ---------- Espace administrateur ----------
 
+// Contrôles automatiques : ils aident l'administrateur à repérer les erreurs et les doublons.
+function controlesAuto(u) {
+  const autres = DB.tous("SELECT telephone FROM users WHERE id != ? AND role IN ('employeur', 'demandeur')", [u.id]);
+  const telDouble = autres.some((a) => chiffres(a.telephone) && chiffres(a.telephone) === chiffres(u.telephone));
+  const controles = [
+    { ok: chiffres(u.telephone).length >= 9, texte: "Téléphone : au moins 9 chiffres" },
+    { ok: !telDouble, texte: telDouble ? "Téléphone déjà utilisé par un autre compte" : "Téléphone utilisé par aucun autre compte" },
+  ];
+  if (u.role === "employeur") {
+    const rccmDouble = DB.tous("SELECT rccm FROM entreprises WHERE user_id != ?", [u.id]).some((a) => normaliser(a.rccm) === normaliser(u.rccm));
+    controles.unshift(
+      { ok: /RCCM/i.test(u.rccm || ""), texte: "N° RCCM au bon format (contient « RCCM »)" },
+      { ok: !rccmDouble, texte: rccmDouble ? "N° RCCM déjà utilisé par une autre entreprise" : "N° RCCM utilisé par aucune autre entreprise" },
+    );
+  } else {
+    const ans = age(u.date_naissance);
+    const pieceDouble = DB.tous("SELECT type_piece, numero_piece FROM profils WHERE user_id != ?", [u.id])
+      .some((a) => a.type_piece === u.type_piece && normaliser(a.numero_piece) === normaliser(u.numero_piece));
+    controles.unshift(
+      { ok: ans !== null && ans >= AGE_MINIMUM, texte: ans === null ? "Date de naissance invalide" : `Âge : ${ans} ans (minimum ${AGE_MINIMUM})` },
+      { ok: !pieceDouble, texte: pieceDouble ? "Pièce d'identité déjà utilisée par un autre compte !" : "Pièce d'identité utilisée par aucun autre compte" },
+      { ok: !!String(u.titre || "").trim() && !!tags(u.competences), texte: "Métier et compétences renseignés" },
+    );
+  }
+  return controles;
+}
+
 function espaceAdmin(moi, params) {
+  const conf = ADMINS[moi.role];
   const filtre = Object.hasOwn(STATUTS_COMPTE, params.get("filtre")) ? params.get("filtre") : "en_attente";
-  const compte = (s) => DB.un("SELECT COUNT(*) AS n FROM users WHERE role = 'employeur' AND statut_compte = ?", [s]).n;
-  const liste = DB.tous(`SELECT u.*, en.*, u.id AS id, d.nom AS decideur FROM users u
-    JOIN entreprises en ON en.user_id = u.id LEFT JOIN users d ON d.id = en.decide_par
-    WHERE u.role = 'employeur' AND u.statut_compte = ? ORDER BY en.dossier_envoye_le ASC, u.id ASC`, [filtre]);
+  const compte = (s) => DB.un("SELECT COUNT(*) AS n FROM users WHERE role = ? AND statut_compte = ?", [conf.cible, s]).n;
+  const jointure = conf.cible === "employeur" ? "JOIN entreprises x ON x.user_id = u.id" : "JOIN profils x ON x.user_id = u.id";
+  const liste = DB.tous(`SELECT x.*, u.*, d.nom AS decideur FROM users u ${jointure}
+    LEFT JOIN users d ON d.id = u.decide_par
+    WHERE u.role = ? AND u.statut_compte = ? ORDER BY u.dossier_envoye_le ASC, u.id ASC`, [conf.cible, filtre]);
 
   const onglets = Object.entries(STATUTS_COMPTE).map(([s, nom]) =>
     `<a class="onglet ${s === filtre ? "actif" : ""}" href="#/espace?filtre=${s}">${e(nom)} <b>${compte(s)}</b></a>`).join("");
 
   const carte = (u) => {
+    const controles = controlesAuto(u);
+    const alertes = controles.filter((c) => !c.ok).length;
     let actions = "";
     if (u.statut_compte === "en_attente") {
       actions = `
-        <form data-form="decision" data-employeur="${u.id}">
+        <form data-form="decision" data-compte="${u.id}">
           <p><b>Contrôle des critères</b> (tous doivent être cochés pour valider) :</p>
-          ${CRITERES.map((c) => `<label class="coche"><input type="checkbox" name="critere_${c.cle}"> ${e(c.texte)}</label>`).join("")}
+          ${conf.criteres.map((c) => `<label class="coche"><input type="checkbox" name="critere_${c.cle}"> ${e(c.texte)}</label>`).join("")}
           <label for="motif-${u.id}">Motif (obligatoire pour refuser)</label>
-          <textarea id="motif-${u.id}" name="motif" maxlength="500" placeholder="Ex : le n° RCCM ne correspond pas au nom de l'entreprise."></textarea>
+          <textarea id="motif-${u.id}" name="motif" maxlength="500" placeholder="Ex : le n° de la pièce d'identité est illisible ou incorrect."></textarea>
           <div class="actions">
             <button class="btn" name="decision" value="valider">✔ Valider</button>
             <button class="btn btn-rouge" name="decision" value="refuser">✖ Refuser</button>
@@ -675,40 +866,45 @@ function espaceAdmin(moi, params) {
         </form>`;
     } else if (u.statut_compte === "valide") {
       actions = `
-        <form data-form="decision" data-employeur="${u.id}">
+        <form data-form="decision" data-compte="${u.id}">
           <label for="motif-${u.id}">Motif de suspension</label>
-          <textarea id="motif-${u.id}" name="motif" maxlength="500" placeholder="Ex : offres trompeuses signalées."></textarea>
+          <textarea id="motif-${u.id}" name="motif" maxlength="500" placeholder="Ex : informations fausses signalées."></textarea>
           <div class="actions"><button class="btn btn-rouge" name="decision" value="suspendre">⛔ Suspendre</button></div>
         </form>`;
     } else if (u.statut_compte === "suspendu") {
       actions = `
-        <form data-form="decision" data-employeur="${u.id}">
+        <form data-form="decision" data-compte="${u.id}">
           <div class="actions"><button class="btn" name="decision" value="reactiver">↩ Réactiver</button></div>
         </form>`;
     }
+    const sousTitre = conf.cible === "employeur" ? (u.secteur || "Secteur ?") : (u.titre || "Métier ?");
     return `
       <div class="carte dossier">
         <div class="ligne" style="justify-content:space-between;flex-wrap:wrap">
           <div>
             <h3>${e(u.nom)}</h3>
-            <p class="sous" style="margin:0">${e(u.secteur || "Secteur ?")} · ${e(u.ville)} · dossier envoyé ${u.dossier_envoye_le ? depuis(u.dossier_envoye_le) : "—"}</p>
+            <p class="sous" style="margin:0">${e(sousTitre)} · ${e(u.ville)} · dossier envoyé ${u.dossier_envoye_le ? depuis(u.dossier_envoye_le) : "—"}</p>
           </div>
           <span class="statut statut-compte-${e(u.statut_compte)}">${e(STATUTS_COMPTE[u.statut_compte])}</span>
         </div>
-        ${ficheDossier(u)}
-        <dl class="fiche"><dt>Contact</dt><dd>📧 ${e(u.email)} · 📞 ${e(u.telephone || "—")}</dd>
-          ${u.description ? `<dt>Présentation</dt><dd>${e(u.description)}</dd>` : ""}
-          ${u.decide_le ? `<dt>Dernière décision</dt><dd>${depuis(u.decide_le)} par ${e(u.decideur || "?")}${u.motif ? ` — « ${e(u.motif)} »` : ""}</dd>` : ""}
-        </dl>
+        ${conf.cible === "employeur" ? ficheEmployeur(u) : ficheDemandeur(u)}
+        ${fiche([["Contact", `📧 ${u.email} · 📞 ${u.telephone || "—"}`]].concat(
+          conf.cible === "employeur" && u.description ? [["Présentation", u.description]] : [],
+          u.decide_le ? [["Dernière décision", `${depuis(u.decide_le)} par ${u.decideur || "?"}${u.motif ? ` — « ${u.motif} »` : ""}`]] : [],
+        ))}
+        <div class="controles ${alertes ? "controles-alerte" : ""}">
+          <b>🤖 Contrôles automatiques ${alertes ? `· ${alertes} alerte(s)` : "· tout est correct"}</b>
+          <ul>${controles.map((c) => `<li>${c.ok ? "✅" : "⚠️"} ${e(c.texte)}</li>`).join("")}</ul>
+        </div>
         ${actions}
       </div>`;
   };
 
   return `
-    <div class="page-titre"><h1>Administration 🛡️</h1><span class="sous">Connecté : ${e(moi.nom)}</span></div>
-    <p>Vérifie chaque employeur avant qu'il puisse publier des offres et voir les coordonnées des talents.</p>
+    ${enTeteEspace(moi, `${e(conf.titre)} 🛡️`, `<span class="sous">Connecté : ${e(moi.nom)}</span>`)}
+    <p>Vérifie chaque dossier de ${e(conf.pluriel)} avant validation. Les contrôles automatiques t'aident à repérer les erreurs et les doublons, mais c'est toi qui décides.</p>
     <nav class="onglets">${onglets}</nav>
-    <div class="liste-dossiers">${liste.map(carte).join("") || `<p class="vide">Aucun employeur « ${e(STATUTS_COMPTE[filtre].toLowerCase())} ».</p>`}</div>`;
+    <div class="liste-dossiers">${liste.map(carte).join("") || `<p class="vide">Aucun dossier « ${e(STATUTS_COMPTE[filtre].toLowerCase())} ».</p>`}</div>`;
 }
 
 // ---------- Formulaires ----------
@@ -750,53 +946,56 @@ const formulaires = {
     const email = String(d.email || "").trim();
     const mdp = String(d.mdp || "");
     // Les règles sont vérifiées ici aussi : le formulaire seul peut être contourné.
+    // On ne peut pas s'inscrire comme administrateur.
     if (!["demandeur", "employeur"].includes(d.role)) return toast("Choisis demandeur ou employeur.");
     if (!nom || nom.length > 100) return toast("Indique un nom (100 caractères maximum).");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast("Cet e-mail n'est pas valide.");
     if (mdp.length < 8) return toast("Le mot de passe doit faire au moins 8 caractères.");
-    if (d.role === "employeur") {
-      const erreur = erreurDossier(d, d.telephone);
-      if (erreur) return toast(erreur);
-    }
+    const erreur = erreurDossier(d.role, d);
+    if (erreur) return toast(erreur);
     if (DB.un("SELECT id FROM users WHERE lower(email) = lower(?)", [email])) {
       toast("Cet e-mail a déjà un compte. Connecte-toi !");
       return;
     }
-    // Un employeur commence toujours « en attente » : seul l'administrateur peut le valider.
-    const statut = d.role === "employeur" ? "en_attente" : "actif";
-    const id = DB.executer("INSERT INTO users (role, nom, email, mot_de_passe, ville, telephone, statut_compte) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [d.role, nom, email, await hacherMotDePasse(mdp), d.ville || "", d.telephone || "", statut]);
-    if (d.role === "employeur") {
-      DB.executer("INSERT INTO entreprises (user_id) VALUES (?)", [id]);
-      enregistrerDossier(id, d);
-    } else {
-      DB.executer("INSERT INTO profils (user_id) VALUES (?)", [id]);
-    }
+    // Tout nouveau compte commence « en attente » : seul un administrateur peut le valider.
+    const id = DB.executer("INSERT INTO users (role, nom, email, mot_de_passe, ville, telephone, statut_compte) VALUES (?, ?, ?, ?, ?, ?, 'en_attente')",
+      [d.role, nom, email, await hacherMotDePasse(mdp), d.ville || "", String(d.telephone || "").trim()]);
+    DB.executer(d.role === "employeur" ? "INSERT INTO entreprises (user_id) VALUES (?)" : "INSERT INTO profils (user_id) VALUES (?)", [id]);
+    enregistrerDossier(d.role, id, d);
     connecter(id);
-    toast(d.role === "employeur" ? "Dossier envoyé ! Un administrateur va le vérifier 🔎" : "Compte créé ! Complète ton profil 🎉");
+    toast("Dossier envoyé ! Un administrateur va le vérifier 🔎");
     aller("#/espace");
   },
 
   dossier(form) {
-    const moi = exiger("employeur");
-    if (!moi) return;
+    const moi = utilisateur();
+    if (!moi || (moi.role !== "employeur" && moi.role !== "demandeur")) return aller("#/connexion");
     if (moi.statut_compte !== "en_attente" && moi.statut_compte !== "refuse") return toast("Ton dossier ne peut plus être modifié.");
     const d = donneesForm(form);
-    const erreur = erreurDossier(d, d.telephone);
+    const erreur = erreurDossier(moi.role, d);
     if (erreur) return toast(erreur);
-    DB.executer("UPDATE users SET ville = ?, telephone = ? WHERE id = ?", [d.ville || "", d.telephone || "", moi.id]);
-    DB.executer("UPDATE entreprises SET description = ?, site = ? WHERE user_id = ?", [d.description || "", d.site || "", moi.id]);
-    enregistrerDossier(moi.id, d);
+    DB.executer("UPDATE users SET ville = ?, telephone = ? WHERE id = ?", [d.ville || "", String(d.telephone).trim(), moi.id]);
+    if (moi.role === "employeur") {
+      DB.executer("UPDATE entreprises SET description = ?, site = ? WHERE user_id = ?", [d.description || "", d.site || "", moi.id]);
+    } else {
+      DB.executer("UPDATE profils SET bio = ?, experience = ? WHERE user_id = ?", [d.bio || "", d.experience || "", moi.id]);
+    }
+    enregistrerDossier(moi.role, moi.id, d);
     toast("Dossier envoyé à l'administrateur 🔎");
     afficher();
   },
 
   decision(form, bouton) {
-    const admin = exiger("admin");
-    if (!admin) return;
+    const admin = utilisateur();
+    if (!estAdmin(admin)) {
+      toast("Réservé aux administrateurs.");
+      return aller("#/connexion");
+    }
+    const conf = ADMINS[admin.role];
+    // Chaque administrateur ne peut décider que pour sa catégorie de comptes.
+    const cible = DB.un("SELECT * FROM users WHERE id = ? AND role = ?", [Number(form.dataset.compte), conf.cible]);
+    if (!cible) return toast("Ce dossier ne fait pas partie de ton périmètre.");
     const decision = bouton && bouton.value;
-    const cible = DB.un("SELECT * FROM users WHERE id = ? AND role = 'employeur'", [Number(form.dataset.employeur)]);
-    if (!cible) return toast("Employeur introuvable.");
     const d = donneesForm(form);
     const motif = String(d.motif || "").trim().slice(0, 500);
 
@@ -809,58 +1008,57 @@ const formulaires = {
     };
     const regle = regles[decision];
     if (!regle || !regle.depuis.includes(cible.statut_compte)) return toast("Action impossible pour ce compte.");
-    if (decision === "valider" && !CRITERES.every((c) => d["critere_" + c.cle])) {
+    if (decision === "valider" && !conf.criteres.every((c) => d["critere_" + c.cle])) {
       return toast("Coche tous les critères avant de valider.");
     }
     if ((decision === "refuser" || decision === "suspendre") && motif.length < 5) {
       return toast("Écris un motif pour expliquer ta décision.");
     }
-    DB.executer("UPDATE users SET statut_compte = ? WHERE id = ?", [regle.vers, cible.id]);
-    DB.executer("UPDATE entreprises SET motif = ?, decide_le = datetime('now'), decide_par = ? WHERE user_id = ?",
-      [motif || null, admin.id, cible.id]);
-    const messages = { valider: "Employeur validé ✅", refuser: "Dossier refusé", suspendre: "Compte suspendu", reactiver: "Compte réactivé ✅" };
+    DB.executer("UPDATE users SET statut_compte = ?, motif = ?, decide_le = datetime('now'), decide_par = ? WHERE id = ?",
+      [regle.vers, motif || null, admin.id, cible.id]);
+    const messages = { valider: "Dossier validé ✅", refuser: "Dossier refusé", suspendre: "Compte suspendu", reactiver: "Compte réactivé ✅" };
     toast(`${messages[decision]} : ${cible.nom}`);
     afficher();
   },
 
   postuler(form) {
-    const moi = exiger("demandeur");
+    const moi = exigerValide("demandeur");
     if (!moi) return;
     const offre = DB.un(`SELECT o.id FROM offres o JOIN users u ON u.id = o.employeur_id
       WHERE o.id = ? AND o.active = 1 AND u.statut_compte = 'valide'`, [Number(form.dataset.offre)]);
     if (!offre) return toast("Cette offre n'est plus disponible.");
     DB.executer("INSERT OR IGNORE INTO candidatures (offre_id, demandeur_id, message) VALUES (?, ?, ?)",
-      [Number(form.dataset.offre), moi.id, donneesForm(form).message]);
+      [offre.id, moi.id, donneesForm(form).message]);
     toast("Candidature envoyée ! Bonne chance 🍀");
     afficher();
   },
 
   profil(form) {
-    const moi = exiger("demandeur");
+    const moi = exigerValide("demandeur");
     if (!moi) return;
     const d = donneesForm(form);
-    DB.executer("UPDATE users SET ville = ?, telephone = ? WHERE id = ?", [d.ville, d.telephone, moi.id]);
-    DB.executer(`INSERT INTO profils (user_id, titre, bio, competences, experience, niveau_etudes, disponible)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET titre = excluded.titre, bio = excluded.bio, competences = excluded.competences,
-        experience = excluded.experience, niveau_etudes = excluded.niveau_etudes, disponible = excluded.disponible`,
-      [moi.id, d.titre, d.bio, d.competences, d.experience, d.niveau_etudes, d.disponible ? 1 : 0]);
+    if (!NIVEAUX.includes(d.niveau_etudes)) return toast("Choisis ton niveau d'études.");
+    const erreur = erreurTelephone(d.telephone);
+    if (erreur) return toast(erreur);
+    DB.executer("UPDATE users SET ville = ?, telephone = ? WHERE id = ?", [d.ville, String(d.telephone).trim(), moi.id]);
+    DB.executer(`UPDATE profils SET titre = ?, bio = ?, competences = ?, experience = ?, niveau_etudes = ?, disponible = ? WHERE user_id = ?`,
+      [d.titre || "", d.bio || "", d.competences || "", d.experience || "", d.niveau_etudes, d.disponible ? 1 : 0, moi.id]);
     toast("Profil enregistré ✅");
   },
 
   entreprise(form) {
-    const moi = exigerEmployeurValide();
+    const moi = exigerValide("employeur");
     if (!moi) return;
     const d = donneesForm(form);
-    DB.executer("UPDATE users SET ville = ?, telephone = ? WHERE id = ?", [d.ville, d.telephone, moi.id]);
-    DB.executer(`INSERT INTO entreprises (user_id, secteur, description, site) VALUES (?, ?, ?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET secteur = excluded.secteur, description = excluded.description, site = excluded.site`,
-      [moi.id, d.secteur, d.description, d.site]);
+    const erreur = erreurTelephone(d.telephone);
+    if (erreur) return toast(erreur);
+    DB.executer("UPDATE users SET ville = ?, telephone = ? WHERE id = ?", [d.ville, String(d.telephone).trim(), moi.id]);
+    DB.executer("UPDATE entreprises SET description = ?, site = ? WHERE user_id = ?", [d.description || "", d.site || "", moi.id]);
     toast("Entreprise enregistrée ✅");
   },
 
   offre(form) {
-    const moi = exigerEmployeurValide();
+    const moi = exigerValide("employeur");
     if (!moi) return;
     const d = donneesForm(form);
     const titre = String(d.titre || "").trim();
@@ -894,7 +1092,7 @@ document.addEventListener("click", (ev) => {
   if (!cible) return;
   if (cible.dataset.action === "deconnexion") deconnecter();
   if (cible.dataset.basculer) {
-    const moi = exigerEmployeurValide();
+    const moi = exigerValide("employeur");
     if (!moi) return;
     DB.executer("UPDATE offres SET active = 1 - active WHERE id = ? AND employeur_id = ?", [Number(cible.dataset.basculer), moi.id]);
     afficher();
@@ -902,14 +1100,18 @@ document.addEventListener("click", (ev) => {
 });
 
 document.addEventListener("change", (ev) => {
-  // Inscription : affiche le dossier de vérification seulement pour les employeurs.
+  // Inscription : affiche le dossier qui correspond au rôle choisi.
+  // Le dossier caché est aussi désactivé, pour que ses champs ne soient pas envoyés.
   if (ev.target.name === "role" && ev.target.closest("[data-form=inscription]")) {
-    document.getElementById("champsEmployeur").hidden = ev.target.value !== "employeur";
+    for (const [id, role] of [["champsDemandeur", "demandeur"], ["champsEmployeur", "employeur"]]) {
+      const bloc = document.getElementById(id);
+      bloc.hidden = bloc.disabled = ev.target.value !== role;
+    }
     return;
   }
   const id = ev.target.dataset.statut;
   if (!id) return;
-  const moi = exigerEmployeurValide();
+  const moi = exigerValide("employeur");
   if (!moi || !Object.hasOwn(STATUTS, ev.target.value)) return;
   prolongerSession();
   DB.executer(`UPDATE candidatures SET statut = ? WHERE id = ?

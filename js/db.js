@@ -2,10 +2,10 @@
 // On utilise SQLite (via sql.js) directement dans le navigateur,
 // et on sauvegarde la base dans le stockage local (localStorage).
 
-// v2 : ajout de l'administrateur et de la validation des employeurs.
-// Les bases de test v1 sont remplacées par une nouvelle base d'exemple.
-const DB_KEY = "musala_db_v2";
-const ANCIENNES_CLES = ["musala_db_v1"];
+// v3 : deux administrateurs (employeurs et demandeurs) et validation des demandeurs.
+// Les anciennes bases de test sont remplacées par une nouvelle base d'exemple.
+const DB_KEY = "musala_db_v3";
+const ANCIENNES_CLES = ["musala_db_v1", "musala_db_v2"];
 
 const DB = {
   sql: null,
@@ -34,15 +34,21 @@ const DB = {
     this.sql.run(`
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        role TEXT NOT NULL CHECK (role IN ('demandeur', 'employeur', 'admin')),
+        role TEXT NOT NULL CHECK (role IN ('demandeur', 'employeur', 'admin_employeurs', 'admin_demandeurs')),
         nom TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         mot_de_passe TEXT NOT NULL,
         ville TEXT,
         telephone TEXT,
-        -- Demandeurs et admin : 'actif'. Employeurs : 'en_attente', 'valide', 'refuse' ou 'suspendu'.
+        -- Administrateurs : 'actif'.
+        -- Employeurs et demandeurs : 'en_attente', 'valide', 'refuse' ou 'suspendu'.
         statut_compte TEXT NOT NULL DEFAULT 'actif'
           CHECK (statut_compte IN ('actif', 'en_attente', 'valide', 'refuse', 'suspendu')),
+        -- Dossier de vérification : date d'envoi et décision de l'administrateur.
+        dossier_envoye_le TEXT,
+        motif TEXT,
+        decide_le TEXT,
+        decide_par INTEGER REFERENCES users(id),
         cree_le TEXT DEFAULT (datetime('now'))
       );
       CREATE TABLE profils (
@@ -52,25 +58,25 @@ const DB = {
         competences TEXT,
         experience TEXT,
         niveau_etudes TEXT,
-        disponible INTEGER DEFAULT 1
+        disponible INTEGER DEFAULT 1,
+        -- Dossier de vérification du demandeur.
+        date_naissance TEXT,
+        type_piece TEXT,
+        numero_piece TEXT,
+        adresse TEXT
       );
       CREATE TABLE entreprises (
         user_id INTEGER PRIMARY KEY REFERENCES users(id),
         secteur TEXT,
         description TEXT,
         site TEXT,
-        -- Dossier de vérification, contrôlé par l'administrateur.
+        -- Dossier de vérification de l'employeur.
         rccm TEXT,
         id_nat TEXT,
         nif TEXT,
         adresse TEXT,
         responsable TEXT,
-        fonction_responsable TEXT,
-        dossier_envoye_le TEXT,
-        -- Décision de l'administrateur.
-        motif TEXT,
-        decide_le TEXT,
-        decide_par INTEGER REFERENCES users(id)
+        fonction_responsable TEXT
       );
       CREATE TABLE offres (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,26 +104,34 @@ const DB = {
   },
 
   // Quelques exemples (fictifs) pour que la plateforme ne soit pas vide.
+  // Tous les numéros (RCCM, Id. Nat., NIF, pièces d'identité, téléphones) sont inventés.
   async remplirExemples() {
     // Chaque compte d'exemple a son propre sel, comme un vrai compte.
-    const mdps = await Promise.all(Array.from({ length: 7 }, () => hacherMotDePasse("musala123")));
+    const mdps = await Promise.all(Array.from({ length: 9 }, () => hacherMotDePasse("musala123")));
 
-    // Employeurs : numéros RCCM, Id. Nat. et NIF inventés.
-    const employeurs = [
+    const ajouterEmployeur = ([nom, email, ville, tel, secteur, desc, rccm, idNat, nif, adresse, resp, fonction, statut]) => {
+      this.sql.run(`INSERT INTO users (role, nom, email, mot_de_passe, ville, telephone, statut_compte, dossier_envoye_le)
+        VALUES ('employeur', ?, ?, ?, ?, ?, ?, datetime('now'))`, [nom, email, mdps.pop(), ville, tel, statut]);
+      this.sql.run(`INSERT INTO entreprises (user_id, secteur, description, rccm, id_nat, nif, adresse, responsable, fonction_responsable)
+        VALUES (last_insert_rowid(), ?, ?, ?, ?, ?, ?, ?, ?)`, [secteur, desc, rccm, idNat, nif, adresse, resp, fonction]);
+    };
+
+    const ajouterDemandeur = ([nom, email, ville, tel, titre, bio, comp, etudes, naissance, piece, numero, adresse, statut]) => {
+      this.sql.run(`INSERT INTO users (role, nom, email, mot_de_passe, ville, telephone, statut_compte, dossier_envoye_le)
+        VALUES ('demandeur', ?, ?, ?, ?, ?, ?, datetime('now'))`, [nom, email, mdps.pop(), ville, tel, statut]);
+      this.sql.run(`INSERT INTO profils (user_id, titre, bio, competences, niveau_etudes, date_naissance, type_piece, numero_piece, adresse)
+        VALUES (last_insert_rowid(), ?, ?, ?, ?, ?, ?, ?, ?)`, [titre, bio, comp, etudes, naissance, piece, numero, adresse]);
+    };
+
+    // Employeurs validés (id 1 à 3).
+    [
       ["Kin Digital", "contact@kindigital.cd", "Kinshasa", "+243 810 000 001", "Informatique & Tech", "Agence web et mobile qui aide les entreprises congolaises à passer au numérique.",
         "CD/KIN/RCCM/21-B-00001", "01-0000-N00001A", "A0000001B", "12, avenue Exemple, Gombe, Kinshasa", "Joël Exemple", "Directeur général", "valide"],
       ["Katanga Mining Services", "rh@kms.cd", "Lubumbashi", "+243 990 000 002", "Mines", "Services techniques et logistiques pour les sites miniers du Haut-Katanga.",
         "CD/LSH/RCCM/19-B-00002", "06-0000-N00002B", "A0000002C", "4, avenue Exemple, Lubumbashi", "Sarah Exemple", "Responsable RH", "valide"],
       ["Kivu Agri Coop", "jobs@kivuagri.cd", "Goma", "+243 970 000 003", "Agriculture", "Coopérative qui accompagne les petits producteurs de café et de légumes du Kivu.",
         "CD/GOM/RCCM/20-B-00003", "09-0000-N00003C", "A0000003D", "7, avenue Exemple, Goma", "Didier Exemple", "Coordinateur", "valide"],
-    ];
-    const ajouterEmployeur = ([nom, email, ville, tel, secteur, desc, rccm, idNat, nif, adresse, resp, fonction, statut]) => {
-      this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville, telephone, statut_compte) VALUES ('employeur', ?, ?, ?, ?, ?, ?)",
-        [nom, email, mdps.pop(), ville, tel, statut]);
-      this.sql.run(`INSERT INTO entreprises (user_id, secteur, description, rccm, id_nat, nif, adresse, responsable, fonction_responsable, dossier_envoye_le)
-        VALUES (last_insert_rowid(), ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`, [secteur, desc, rccm, idNat, nif, adresse, resp, fonction]);
-    };
-    employeurs.forEach(ajouterEmployeur);
+    ].forEach(ajouterEmployeur);
 
     const offres = [
       [1, "Développeur web junior", "Informatique & Tech", "Kinshasa", "CDI", "800 $ / mois", "Rejoins notre équipe pour créer des sites et applications pour nos clients.\n\nTu travailleras avec HTML, CSS, JavaScript et tu seras accompagné par un développeur senior.", "HTML, CSS, JavaScript"],
@@ -131,23 +145,34 @@ const DB = {
       this.sql.run("INSERT INTO offres (employeur_id, titre, secteur, ville, type_contrat, salaire, description, competences) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", o);
     }
 
-    const demandeurs = [
-      ["Grâce Mbuyi", "grace@exemple.cd", "Kinshasa", "Développeuse web", "Passionnée de code depuis le lycée, je crée des sites modernes et rapides.", "HTML, CSS, JavaScript, React", "Licence en informatique"],
-      ["Patrick Ilunga", "patrick@exemple.cd", "Lubumbashi", "Électromécanicien", "5 ans d'expérience dans la maintenance industrielle.", "Électricité, Mécanique, Soudure", "Graduat technique"],
-      ["Esther Kahindo", "esther@exemple.cd", "Goma", "Agronome", "J'aide les agriculteurs à produire plus et mieux.", "Agronomie, Swahili, Gestion de projet", "Master en agronomie"],
-    ];
-    for (const [nom, email, ville, titre, bio, comp, etudes] of demandeurs) {
-      this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES ('demandeur', ?, ?, ?, ?)", [nom, email, mdps.pop(), ville]);
-      this.sql.run("INSERT INTO profils (user_id, titre, bio, competences, niveau_etudes) VALUES (last_insert_rowid(), ?, ?, ?, ?)", [titre, bio, comp, etudes]);
-    }
+    // Demandeurs validés (id 4 à 6).
+    [
+      ["Grâce Mbuyi", "grace@exemple.cd", "Kinshasa", "+243 810 100 001", "Développeuse web", "Passionnée de code depuis le lycée, je crée des sites modernes et rapides.",
+        "HTML, CSS, JavaScript, React", "Licence", "2000-03-14", "Carte d'électeur", "CE-0000000001", "5, avenue Exemple, Ngaliema, Kinshasa", "valide"],
+      ["Patrick Ilunga", "patrick@exemple.cd", "Lubumbashi", "+243 990 100 002", "Électromécanicien", "5 ans d'expérience dans la maintenance industrielle.",
+        "Électricité, Mécanique, Soudure", "Graduat", "1994-08-02", "Passeport", "OP0000002", "9, avenue Exemple, Kampemba, Lubumbashi", "valide"],
+      ["Esther Kahindo", "esther@exemple.cd", "Goma", "+243 970 100 003", "Agronome", "J'aide les agriculteurs à produire plus et mieux.",
+        "Agronomie, Swahili, Gestion de projet", "Master", "1997-11-25", "Carte d'électeur", "CE-0000000003", "2, avenue Exemple, Karisimbi, Goma", "valide"],
+    ].forEach(ajouterDemandeur);
 
-    // Un employeur qui attend la validation, pour tester l'espace administrateur.
+    // Un employeur en attente (id 7).
     ajouterEmployeur(["Congo Bâtiment Plus", "rh@congobatiment.cd", "Kinshasa", "+243 820 000 004", "BTP", "Entreprise de construction de maisons et de petits immeubles.",
       "CD/KIN/RCCM/23-B-00004", "01-0000-N00004D", "A0000004E", "33, avenue Exemple, Limete, Kinshasa", "Paul Exemple", "Gérant", "en_attente"]);
 
-    // L'administrateur de Musala.
-    this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES ('admin', 'Administrateur Musala', 'admin@musala.cd', ?, 'Kinshasa')",
-      [await hacherMotDePasse("admin-musala")]);
+    // Deux demandeurs en attente (id 8 et 9). Le second utilise le même passeport que Patrick :
+    // les contrôles automatiques le signalent à l'administrateur.
+    [
+      ["Merveille Nsimba", "merveille@exemple.cd", "Matadi", "+243 850 100 004", "Infirmière", "Diplômée en soins infirmiers, je cherche un premier poste en clinique.",
+        "Soins, Premiers secours, Accueil des patients", "Graduat", "2001-06-09", "Carte d'électeur", "CE-0000000004", "14, avenue Exemple, Matadi", "en_attente"],
+      ["Jonathan Mukendi", "jonathan@exemple.cd", "Kananga", "+243 840 100 005", "Chauffeur", "Permis B et C, je connais bien les routes du Kasaï.",
+        "Permis C, Mécanique de base", "Diplôme d'État", "1999-01-30", "Passeport", "OP0000002", "3, avenue Exemple, Kananga", "en_attente"],
+    ].forEach(ajouterDemandeur);
+
+    // Les deux administrateurs : chacun s'occupe de ses propres dossiers.
+    this.sql.run(`INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES
+      ('admin_employeurs', 'Admin Employeurs', 'admin.employeurs@musala.cd', ?, 'Kinshasa'),
+      ('admin_demandeurs', 'Admin Demandeurs', 'admin.demandeurs@musala.cd', ?, 'Kinshasa')`,
+      [await hacherMotDePasse("admin-employeurs"), await hacherMotDePasse("admin-demandeurs")]);
   },
 
   // Lire des lignes : renvoie une liste d'objets.

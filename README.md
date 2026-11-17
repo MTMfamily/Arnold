@@ -8,22 +8,32 @@ Projet d'Arnold · atelier Code en Famille.
 
 ## Ce qu'on peut faire
 
-- 👤 **Demandeurs d'emploi** : créer son profil (métier, compétences, études, expérience), chercher des offres et postuler, puis suivre ses candidatures.
+- 👤 **Demandeurs d'emploi** : une fois **vérifiés**, apparaître dans les talents, postuler aux offres et suivre ses candidatures.
 - 🏢 **Employeurs** : une fois **vérifiés**, présenter son entreprise, publier des offres, voir les candidats et changer leur statut (vue, entretien, retenue…).
-- 🛡️ **Administrateur** : vérifier le dossier de chaque employeur, puis le valider, le refuser (avec un motif), le suspendre ou le réactiver.
+- 🛡️ **Deux administrateurs**, chacun avec sa propre file de dossiers :
+  - l'**admin des employeurs** traite seulement les dossiers des entreprises ;
+  - l'**admin des demandeurs** traite seulement les dossiers des demandeurs.
 - 🔎 Chercher les offres par mot-clé, ville, secteur et contrat, et parcourir les talents.
 
-## La validation des employeurs
+## La validation des comptes
 
-Pour protéger les demandeurs contre les fausses offres, un employeur doit être **validé par un administrateur** avant de recruter.
+Tout nouveau compte, employeur ou demandeur, doit être **validé par un administrateur** avant de pouvoir agir.
 
-1. À l'inscription, l'employeur remplit un **dossier de vérification** : n° RCCM, n° Id. Nat., n° d'impôt (NIF), adresse du siège, responsable du recrutement (nom et fonction), téléphone.
-2. Son compte est **en attente** : il ne peut pas publier d'offres ni voir les coordonnées des talents.
-3. L'administrateur contrôle chaque critère (cases à cocher) puis **valide** le compte, ou le **refuse** avec un motif.
-4. Un employeur refusé voit le motif, corrige son dossier et le renvoie.
-5. Un employeur validé reçoit le badge **✔ Vérifié** sur ses offres. S'il triche, l'administrateur peut le **suspendre** : ses offres disparaissent tout de suite.
+1. À l'inscription, on remplit un **dossier de vérification**. Les champs obligatoires sont marqués d'une étoile rouge **\***. Le navigateur bloque l'envoi s'il en manque un, et le code vérifie aussi chaque champ (on ne peut pas tricher en modifiant la page).
+2. Le compte est **en attente** : un employeur ne peut pas publier d'offres ni voir les coordonnées des talents ; un demandeur ne peut pas postuler et n'apparaît pas dans les talents.
+3. L'administrateur concerné voit le dossier avec des **contrôles automatiques** (âge, doublons de pièce d'identité, de RCCM ou de téléphone…). Il coche chaque critère puis **valide**, ou **refuse** avec un motif.
+4. Un compte refusé voit le motif, corrige son dossier et le renvoie.
+5. Un compte validé reçoit le badge **✔ Vérifié**. En cas de triche, l'administrateur peut le **suspendre** : ses offres ou son profil disparaissent tout de suite.
 
-Les critères sont dans `js/app.js` (liste `CRITERES`) et peuvent être modifiés.
+### Dossier d'un demandeur (tous les champs sont obligatoires, sauf « À propos » et « Expérience »)
+
+Nom complet (comme sur la pièce d'identité), ville, téléphone, e-mail, mot de passe, date de naissance (**18 ans minimum**), niveau d'études, type de pièce d'identité (carte d'électeur, passeport ou permis de conduire), n° de la pièce, adresse de résidence, métier recherché, au moins une compétence.
+
+### Dossier d'un employeur (tous les champs sont obligatoires, sauf la présentation et le site web)
+
+Nom de l'entreprise, ville, téléphone, e-mail, mot de passe, secteur, n° RCCM, n° Id. Nat., n° d'impôt (NIF), adresse du siège, nom et fonction du responsable du recrutement.
+
+Les critères sont dans `js/app.js` (listes `CRITERES_DEMANDEUR` et `CRITERES_EMPLOYEUR`, et constante `AGE_MINIMUM`) et peuvent être modifiés.
 
 ## La base de données embarquée
 
@@ -37,7 +47,7 @@ Les tables sont dans `js/db.js` : `users` (avec le rôle et le statut du compte)
 ## Sécurité
 
 - **Mots de passe** : jamais gardés en clair. Musala garde une empreinte PBKDF2-SHA256 (210 000 tours) avec un sel aléatoire pour chaque compte. La règle des 8 caractères minimum est aussi vérifiée dans le code. Les comptes créés avec l'ancien format sont mis à jour à la connexion.
-- **Rôles** : chaque action vérifie que tu as le bon rôle et le bon statut (seul un employeur validé publie une offre, seul un demandeur postule, seul l'administrateur valide les employeurs…). Personne ne peut s'inscrire comme administrateur.
+- **Rôles** : chaque action vérifie que tu as le bon rôle et le bon statut (seul un employeur validé publie une offre, seul un demandeur validé postule, chaque administrateur ne traite que les dossiers de sa catégorie…). Personne ne peut s'inscrire comme administrateur.
 - **Session** : déconnexion automatique après 30 minutes sans activité, pour les ordinateurs partagés.
 - **Injections** : tout le texte est « échappé » avant d'être affiché (contre le XSS), et toutes les requêtes SQL utilisent des paramètres `?`.
 - **En-têtes de sécurité** : `vercel.json` ajoute une politique CSP, l'anti-clickjacking et d'autres protections.
@@ -48,14 +58,17 @@ Les tables sont dans `js/db.js` : `users` (avec le rôle et le statut du compte)
 
 | Rôle | E-mail | Mot de passe |
 |---|---|---|
-| Demandeuse | `grace@exemple.cd` | `musala123` |
+| Demandeuse validée | `grace@exemple.cd` | `musala123` |
+| Demandeuse en attente | `merveille@exemple.cd` | `musala123` |
+| Demandeur en attente (pièce d'identité en double) | `jonathan@exemple.cd` | `musala123` |
 | Employeur validé | `contact@kindigital.cd` | `musala123` |
 | Employeur en attente | `rh@congobatiment.cd` | `musala123` |
-| Administrateur | `admin@musala.cd` | `admin-musala` |
+| Admin des employeurs | `admin.employeurs@musala.cd` | `admin-employeurs` |
+| Admin des demandeurs | `admin.demandeurs@musala.cd` | `admin-demandeurs` |
 
-> ⚠️ Avant une vraie mise en service, change le mot de passe de l'administrateur : il est écrit ici pour les tests.
+> ⚠️ Avant une vraie mise en service, change les mots de passe des administrateurs : ils sont écrits ici pour les tests.
 
-Les entreprises et personnes d'exemple sont inventées.
+Les entreprises, les personnes et tous les numéros d'exemple (RCCM, pièces d'identité, téléphones…) sont inventés.
 
 ## Lancer le site sur ton ordinateur
 
