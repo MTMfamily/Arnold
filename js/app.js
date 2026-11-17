@@ -168,7 +168,14 @@ function utilisateur() {
     toast("Session expirée : reconnecte-toi.");
     return null;
   }
-  return DB.un("SELECT * FROM users WHERE id = ?", [s.id]);
+  const u = DB.un("SELECT * FROM users WHERE id = ?", [s.id]);
+  // Un administrateur désactivé par le super admin est déconnecté tout de suite.
+  if (u && estAdmin(u) && u.statut_compte === "suspendu") {
+    oublierSession();
+    toast("Ton compte administrateur a été désactivé.");
+    return null;
+  }
+  return u;
 }
 
 // Chaque action repousse l'expiration de 30 minutes.
@@ -180,6 +187,19 @@ function prolongerSession() {
 function estAdmin(u) {
   return !!u && Object.hasOwn(ADMINS, u.role);
 }
+
+function estSuperAdmin(u) {
+  return !!u && u.role === "super_admin";
+}
+
+// Mot de passe temporaire aléatoire (sans caractères faciles à confondre comme 0/O ou 1/l).
+function genererMotDePasse() {
+  const lettres = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  return Array.from(crypto.getRandomValues(new Uint32Array(12)), (n) => lettres[n % lettres.length]).join("");
+}
+
+// Mot de passe temporaire à afficher une seule fois au super admin.
+let mdpTemporaire = null;
 
 function estValide(u, role) {
   return !!u && u.role === role && u.statut_compte === "valide";
@@ -223,6 +243,8 @@ function majNav() {
   if (estAdmin(moi)) {
     const n = DB.un("SELECT COUNT(*) AS n FROM users WHERE role = ? AND statut_compte = 'en_attente'", [ADMINS[moi.role].cible]).n;
     lienEspace = `<a href="#/espace">Administration${n ? ` <span class="pastille">${n}</span>` : ""}</a>`;
+  } else if (estSuperAdmin(moi)) {
+    lienEspace = '<a href="#/espace">Super admin 👑</a>';
   }
   document.getElementById("navUser").innerHTML = moi
     ? `${lienEspace}
@@ -446,7 +468,8 @@ const pages = {
         <button class="btn">Se connecter</button>
         <p style="text-align:center">Pas encore de compte ? <a href="#/inscription">Inscris-toi</a></p>
         <div class="astuce">💡 Comptes de test (mot de passe <b>musala123</b>) : <b>grace@exemple.cd</b> (demandeuse validée), <b>merveille@exemple.cd</b> (demandeuse en attente), <b>contact@kindigital.cd</b> (employeur validé), <b>rh@congobatiment.cd</b> (employeur en attente).
-          <br>Administrateurs : <b>admin.employeurs@musala.cd</b> / <b>admin-employeurs</b> et <b>admin.demandeurs@musala.cd</b> / <b>admin-demandeurs</b>.</div>
+          <br>Administrateurs : <b>admin.employeurs@musala.cd</b> / <b>admin-employeurs</b> et <b>admin.demandeurs@musala.cd</b> / <b>admin-demandeurs</b>.
+          <br>Super admin : <b>superadmin@musala.cd</b> / <b>super-musala</b>.</div>
         <div class="astuce">🔒 Sur un ordinateur partagé (cybercafé, école), pense à cliquer sur <b>Déconnexion</b> en partant. Par sécurité, Musala te déconnecte aussi après 30 minutes sans activité.</div>
       </form>`;
   },
@@ -498,8 +521,30 @@ const pages = {
   espace(params) {
     const moi = utilisateur();
     if (!moi) { aller("#/connexion"); return ""; }
+    if (estSuperAdmin(moi)) return espaceSuperAdmin(moi);
     if (estAdmin(moi)) return espaceAdmin(moi, params);
     return moi.role === "employeur" ? espaceEmployeur(moi) : espaceDemandeur(moi);
+  },
+
+  motDePasse() {
+    const moi = utilisateur();
+    if (!moi) { aller("#/connexion"); return ""; }
+    const minimum = estAdmin(moi) || estSuperAdmin(moi) ? 10 : 8;
+    return `
+      <form class="form carte" data-form="mot-de-passe">
+        ${moi.doit_changer_mdp
+          ? `<div class="bandeau bandeau-en_attente">🔑 <b>Bienvenue ${e(moi.nom)} !</b> Ton compte a été créé avec un mot de passe temporaire. Choisis ton propre mot de passe pour continuer.</div>`
+          : '<a href="#/espace">← Mon espace</a>'}
+        <h1>Changer mon mot de passe</h1>
+        ${NOTE_OBL}
+        <label for="actuel">Mot de passe actuel${moi.doit_changer_mdp ? " (temporaire)" : ""}${OBL}</label>
+        <input id="actuel" name="actuel" type="password" required autocomplete="current-password">
+        <label for="nouveau">Nouveau mot de passe (${minimum} caractères minimum)${OBL}</label>
+        <input id="nouveau" name="nouveau" type="password" minlength="${minimum}" required autocomplete="new-password">
+        <label for="confirmation">Confirme le nouveau mot de passe${OBL}</label>
+        <input id="confirmation" name="confirmation" type="password" minlength="${minimum}" required autocomplete="new-password">
+        <button class="btn btn-rouge">Enregistrer</button>
+      </form>`;
   },
 
   nouvelleOffre() {
@@ -656,10 +701,83 @@ function bandeauStatut(moi) {
 }
 
 function enTeteEspace(moi, titre, bouton = "") {
-  const pastille = estAdmin(moi) ? "" : ` <span class="statut statut-compte-${e(moi.statut_compte)}">${e(STATUTS_COMPTE[moi.statut_compte])}</span>`;
+  const gestion = estAdmin(moi) || estSuperAdmin(moi);
+  const pastille = gestion ? "" : ` <span class="statut statut-compte-${e(moi.statut_compte)}">${e(STATUTS_COMPTE[moi.statut_compte])}</span>`;
   return `
     <div class="page-titre"><h1>${titre}${pastille}</h1>${bouton}</div>
-    ${estAdmin(moi) ? "" : bandeauStatut(moi)}`;
+    <p class="lien-mdp"><a href="#/mot-de-passe">🔑 Changer mon mot de passe</a></p>
+    ${gestion ? "" : bandeauStatut(moi)}`;
+}
+
+// ---------- Espace super administrateur ----------
+
+const TYPES_ADMIN = { admin_employeurs: "Admin des employeurs", admin_demandeurs: "Admin des demandeurs" };
+
+function espaceSuperAdmin(moi) {
+  const n = (req, p = []) => DB.un(req, p).n;
+  const admins = DB.tous(`SELECT u.*, c.nom AS createur,
+      (SELECT COUNT(*) FROM users x WHERE x.decide_par = u.id) AS decisions
+    FROM users u LEFT JOIN users c ON c.id = u.cree_par
+    WHERE u.role IN ('admin_employeurs', 'admin_demandeurs') ORDER BY u.role, u.nom`);
+
+  // Le mot de passe temporaire n'est montré qu'une fois, puis oublié.
+  const mdp = mdpTemporaire;
+  mdpTemporaire = null;
+  const bandeauMdp = mdp ? `
+    <div class="bandeau bandeau-mdp">
+      🔑 <b>Mot de passe temporaire de ${e(mdp.nom)} :</b> <code class="mdp">${e(mdp.mdp)}</code>
+      <br>Note-le et transmets-le à la personne de façon sûre (en main propre ou par téléphone). Il ne sera plus affiché.
+      À sa première connexion, elle devra choisir son propre mot de passe.
+    </div>` : "";
+
+  const lignes = admins.map((a) => `
+    <tr>
+      <td><b>${e(a.nom)}</b><br><small>${e(a.email)}</small></td>
+      <td>${e(TYPES_ADMIN[a.role])}</td>
+      <td>${a.statut_compte === "suspendu" ? '<span class="statut statut-compte-suspendu">Désactivé</span>' : '<span class="statut statut-compte-valide">Actif</span>'}
+        ${a.doit_changer_mdp ? '<br><small>🔑 mot de passe temporaire</small>' : ""}</td>
+      <td>${a.decisions}</td>
+      <td><small>${e(a.createur || "—")}<br>${depuis(a.cree_le)}</small></td>
+      <td><div class="actions-admin">
+        ${a.statut_compte === "suspendu"
+          ? `<button class="btn btn-petit" data-gerer-admin="reactiver" data-id="${a.id}">Réactiver</button>`
+          : `<button class="btn btn-petit btn-rouge" data-gerer-admin="desactiver" data-id="${a.id}">Désactiver</button>`}
+        <button class="btn btn-petit btn-blanc" data-gerer-admin="reinitialiser" data-id="${a.id}">Nouveau mot de passe</button>
+      </div></td>
+    </tr>`).join("");
+
+  return `
+    ${enTeteEspace(moi, "Super admin 👑", `<span class="sous">Connecté : ${e(moi.nom)}</span>`)}
+    ${bandeauMdp}
+    <p>Tu crées et gères les comptes des administrateurs. Chaque administrateur traite ensuite les dossiers de sa catégorie.</p>
+
+    <section class="stats">
+      <div class="stat"><b>${n("SELECT COUNT(*) AS n FROM users WHERE role = 'employeur' AND statut_compte = 'en_attente'")}</b><span>employeurs en attente</span></div>
+      <div class="stat"><b>${n("SELECT COUNT(*) AS n FROM users WHERE role = 'demandeur' AND statut_compte = 'en_attente'")}</b><span>demandeurs en attente</span></div>
+      <div class="stat"><b>${n("SELECT COUNT(*) AS n FROM users WHERE role IN ('admin_employeurs', 'admin_demandeurs') AND statut_compte = 'actif'")}</b><span>administrateurs actifs</span></div>
+    </section>
+
+    <h2 class="section">Les administrateurs</h2>
+    <div class="carte table-scroll">
+      ${admins.length ? `<table><tr><th>Administrateur</th><th>Type</th><th>État</th><th>Décisions</th><th>Créé par</th><th></th></tr>${lignes}</table>`
+        : '<p class="vide">Aucun administrateur pour le moment.</p>'}
+    </div>
+
+    <h2 class="section">Créer un administrateur</h2>
+    <form class="carte" data-form="creer-admin">
+      ${NOTE_OBL}
+      <div class="deux-col">
+        <div><label for="nom">Nom complet${OBL}</label><input id="nom" name="nom" required maxlength="100"></div>
+        <div><label for="email">E-mail${OBL}</label><input id="email" name="email" type="email" required></div>
+      </div>
+      <label for="type">Type d'administrateur${OBL}</label>
+      <select id="type" name="type" required>
+        <option value="">Choisir…</option>
+        ${Object.entries(TYPES_ADMIN).map(([k, v]) => `<option value="${k}">${e(v)}</option>`).join("")}
+      </select>
+      <p class="sous">Un mot de passe temporaire sera créé automatiquement et affiché une seule fois.</p>
+      <button class="btn btn-rouge">Créer l'administrateur</button>
+    </form>`;
 }
 
 // Formulaire de dossier pour un compte pas encore validé (en attente, refusé ou suspendu).
@@ -930,12 +1048,18 @@ const formulaires = {
       toast("E-mail ou mot de passe incorrect.");
       return;
     }
+    if (estAdmin(u) && u.statut_compte === "suspendu") {
+      toast("Ce compte administrateur a été désactivé par le super admin.");
+      return;
+    }
     // Un compte créé avant la mise à jour passe au nouveau format, plus sûr.
     if (ancienFormat(u.mot_de_passe)) {
       DB.executer("UPDATE users SET mot_de_passe = ? WHERE id = ?", [await hacherMotDePasse(d.mdp), u.id]);
     }
     connecter(u.id);
     toast(`Bienvenue ${u.role === "demandeur" ? u.nom.split(" ")[0] : u.nom} !`);
+    // Mot de passe temporaire : il faut d'abord en choisir un nouveau.
+    if (u.doit_changer_mdp) return aller("#/mot-de-passe");
     const retour = form.dataset.retour;
     aller(retour && retour.startsWith("#/") ? retour : "#/espace");
   },
@@ -982,6 +1106,43 @@ const formulaires = {
     }
     enregistrerDossier(moi.role, moi.id, d);
     toast("Dossier envoyé à l'administrateur 🔎");
+    afficher();
+  },
+
+  async "mot-de-passe"(form) {
+    const moi = utilisateur();
+    if (!moi) return aller("#/connexion");
+    const d = donneesForm(form);
+    const minimum = estAdmin(moi) || estSuperAdmin(moi) ? 10 : 8;
+    const nouveau = String(d.nouveau || "");
+    if (!await verifierMotDePasse(String(d.actuel || ""), moi.mot_de_passe)) return toast("Le mot de passe actuel est incorrect.");
+    if (nouveau.length < minimum) return toast(`Le nouveau mot de passe doit faire au moins ${minimum} caractères.`);
+    if (nouveau !== d.confirmation) return toast("Les deux nouveaux mots de passe ne sont pas identiques.");
+    if (nouveau === d.actuel) return toast("Choisis un mot de passe différent de l'actuel.");
+    DB.executer("UPDATE users SET mot_de_passe = ?, doit_changer_mdp = 0 WHERE id = ?", [await hacherMotDePasse(nouveau), moi.id]);
+    toast("Mot de passe changé ✅");
+    aller("#/espace");
+  },
+
+  async "creer-admin"(form) {
+    const chef = utilisateur();
+    if (!estSuperAdmin(chef)) {
+      toast("Réservé au super admin.");
+      return aller("#/connexion");
+    }
+    const d = donneesForm(form);
+    const nom = String(d.nom || "").trim();
+    const email = String(d.email || "").trim();
+    // Le super admin ne peut créer que les deux types d'administrateurs (jamais un autre super admin).
+    if (!Object.hasOwn(TYPES_ADMIN, d.type)) return toast("Choisis le type d'administrateur.");
+    if (!nom || nom.length > 100) return toast("Indique le nom de l'administrateur.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast("Cet e-mail n'est pas valide.");
+    if (DB.un("SELECT id FROM users WHERE lower(email) = lower(?)", [email])) return toast("Cet e-mail est déjà utilisé.");
+    const mdp = genererMotDePasse();
+    DB.executer(`INSERT INTO users (role, nom, email, mot_de_passe, ville, statut_compte, cree_par, doit_changer_mdp)
+      VALUES (?, ?, ?, ?, 'Kinshasa', 'actif', ?, 1)`, [d.type, nom, email, await hacherMotDePasse(mdp), chef.id]);
+    mdpTemporaire = { nom, mdp };
+    toast(`${TYPES_ADMIN[d.type]} créé : ${nom}`);
     afficher();
   },
 
@@ -1086,8 +1247,42 @@ document.addEventListener("submit", (ev) => {
   }
 });
 
+// Le super admin désactive, réactive ou donne un nouveau mot de passe à un administrateur.
+async function gererAdmin(action, id) {
+  const chef = utilisateur();
+  if (!estSuperAdmin(chef)) {
+    toast("Réservé au super admin.");
+    return aller("#/connexion");
+  }
+  const admin = DB.un("SELECT * FROM users WHERE id = ? AND role IN ('admin_employeurs', 'admin_demandeurs')", [Number(id)]);
+  if (!admin) return toast("Administrateur introuvable.");
+  if (action === "desactiver") {
+    DB.executer("UPDATE users SET statut_compte = 'suspendu' WHERE id = ?", [admin.id]);
+    toast(`${admin.nom} est désactivé`);
+  } else if (action === "reactiver") {
+    DB.executer("UPDATE users SET statut_compte = 'actif' WHERE id = ?", [admin.id]);
+    toast(`${admin.nom} est réactivé ✅`);
+  } else if (action === "reinitialiser") {
+    const mdp = genererMotDePasse();
+    DB.executer("UPDATE users SET mot_de_passe = ?, doit_changer_mdp = 1 WHERE id = ?", [await hacherMotDePasse(mdp), admin.id]);
+    mdpTemporaire = { nom: admin.nom, mdp };
+    toast(`Nouveau mot de passe créé pour ${admin.nom}`);
+  } else {
+    return;
+  }
+  afficher();
+}
+
 document.addEventListener("click", (ev) => {
   prolongerSession();
+  const gestion = ev.target.closest("[data-gerer-admin]");
+  if (gestion) {
+    gererAdmin(gestion.dataset.gererAdmin, gestion.dataset.id).catch((err) => {
+      console.error(err);
+      toast("Oups, une erreur est survenue.");
+    });
+    return;
+  }
   const cible = ev.target.closest("[data-action], [data-basculer]");
   if (!cible) return;
   if (cible.dataset.action === "deconnexion") deconnecter();
@@ -1129,9 +1324,16 @@ function afficher() {
   const [chemin, recherche] = (location.hash.slice(1) || "/").split("?");
   const params = new URLSearchParams(recherche || "");
   const morceaux = chemin.split("/").filter(Boolean);
+  // Tant qu'un mot de passe temporaire n'est pas changé, seule la page « mot de passe » est accessible.
+  const moi = utilisateur();
+  if (moi && moi.doit_changer_mdp && morceaux[0] !== "mot-de-passe") {
+    aller("#/mot-de-passe");
+    return;
+  }
   let html;
   switch (morceaux[0]) {
     case undefined: html = pages.accueil(); break;
+    case "mot-de-passe": html = pages.motDePasse(); break;
     case "offres": html = pages.offres(params); break;
     case "offre": html = pages.offre(params, morceaux[1]); break;
     case "talents": html = pages.talents(params); break;

@@ -2,10 +2,10 @@
 // On utilise SQLite (via sql.js) directement dans le navigateur,
 // et on sauvegarde la base dans le stockage local (localStorage).
 
-// v3 : deux administrateurs (employeurs et demandeurs) et validation des demandeurs.
+// v4 : super administrateur qui crée et gère les comptes des administrateurs.
 // Les anciennes bases de test sont remplacées par une nouvelle base d'exemple.
-const DB_KEY = "musala_db_v3";
-const ANCIENNES_CLES = ["musala_db_v1", "musala_db_v2"];
+const DB_KEY = "musala_db_v4";
+const ANCIENNES_CLES = ["musala_db_v1", "musala_db_v2", "musala_db_v3"];
 
 const DB = {
   sql: null,
@@ -34,7 +34,7 @@ const DB = {
     this.sql.run(`
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        role TEXT NOT NULL CHECK (role IN ('demandeur', 'employeur', 'admin_employeurs', 'admin_demandeurs')),
+        role TEXT NOT NULL CHECK (role IN ('demandeur', 'employeur', 'admin_employeurs', 'admin_demandeurs', 'super_admin')),
         nom TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         mot_de_passe TEXT NOT NULL,
@@ -49,6 +49,9 @@ const DB = {
         motif TEXT,
         decide_le TEXT,
         decide_par INTEGER REFERENCES users(id),
+        -- Comptes d'administrateurs : qui les a créés, et mot de passe temporaire à changer.
+        cree_par INTEGER REFERENCES users(id),
+        doit_changer_mdp INTEGER NOT NULL DEFAULT 0,
         cree_le TEXT DEFAULT (datetime('now'))
       );
       CREATE TABLE profils (
@@ -168,11 +171,17 @@ const DB = {
         "Permis C, Mécanique de base", "Diplôme d'État", "1999-01-30", "Passeport", "OP0000002", "3, avenue Exemple, Kananga", "en_attente"],
     ].forEach(ajouterDemandeur);
 
-    // Les deux administrateurs : chacun s'occupe de ses propres dossiers.
+    // Les deux administrateurs (id 10 et 11) : chacun s'occupe de ses propres dossiers.
     this.sql.run(`INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES
       ('admin_employeurs', 'Admin Employeurs', 'admin.employeurs@musala.cd', ?, 'Kinshasa'),
       ('admin_demandeurs', 'Admin Demandeurs', 'admin.demandeurs@musala.cd', ?, 'Kinshasa')`,
       [await hacherMotDePasse("admin-employeurs"), await hacherMotDePasse("admin-demandeurs")]);
+
+    // Le super administrateur (id 12) : le seul qui peut créer des administrateurs.
+    // Il ne peut pas être créé depuis le site.
+    this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES ('super_admin', 'Super Admin', 'superadmin@musala.cd', ?, 'Kinshasa')",
+      [await hacherMotDePasse("super-musala")]);
+    this.sql.run("UPDATE users SET cree_par = last_insert_rowid() WHERE role IN ('admin_employeurs', 'admin_demandeurs')");
   },
 
   // Lire des lignes : renvoie une liste d'objets.

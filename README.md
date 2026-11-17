@@ -10,10 +10,20 @@ Projet d'Arnold · atelier Code en Famille.
 
 - 👤 **Demandeurs d'emploi** : une fois **vérifiés**, apparaître dans les talents, postuler aux offres et suivre ses candidatures.
 - 🏢 **Employeurs** : une fois **vérifiés**, présenter son entreprise, publier des offres, voir les candidats et changer leur statut (vue, entretien, retenue…).
-- 🛡️ **Deux administrateurs**, chacun avec sa propre file de dossiers :
+- 👑 **Super admin** : le seul qui crée les comptes des administrateurs. Il peut aussi les désactiver, les réactiver et leur donner un nouveau mot de passe. Il ne valide pas de dossiers lui-même.
+- 🛡️ **Administrateurs**, chacun avec sa propre file de dossiers :
   - l'**admin des employeurs** traite seulement les dossiers des entreprises ;
   - l'**admin des demandeurs** traite seulement les dossiers des demandeurs.
 - 🔎 Chercher les offres par mot-clé, ville, secteur et contrat, et parcourir les talents.
+
+## Le super admin
+
+1. Le super admin crée un administrateur : nom, e-mail et type (employeurs ou demandeurs).
+2. Musala génère un **mot de passe temporaire** de 12 caractères, affiché **une seule fois**. Le super admin le transmet à la personne de façon sûre.
+3. À sa première connexion, le nouvel administrateur **doit choisir son propre mot de passe** (10 caractères minimum) avant d'accéder à quoi que ce soit.
+4. Le super admin voit la liste des administrateurs, leur nombre de décisions et qui les a créés. Il peut **désactiver** un administrateur (il est déconnecté immédiatement et ne peut plus se connecter), le **réactiver**, ou lui donner un **nouveau mot de passe** temporaire.
+
+Il n'y a qu'un seul super admin, et personne ne peut en créer un autre depuis le site.
 
 ## La validation des comptes
 
@@ -47,7 +57,7 @@ Les tables sont dans `js/db.js` : `users` (avec le rôle et le statut du compte)
 ## Sécurité
 
 - **Mots de passe** : jamais gardés en clair. Musala garde une empreinte PBKDF2-SHA256 (210 000 tours) avec un sel aléatoire pour chaque compte. La règle des 8 caractères minimum est aussi vérifiée dans le code. Les comptes créés avec l'ancien format sont mis à jour à la connexion.
-- **Rôles** : chaque action vérifie que tu as le bon rôle et le bon statut (seul un employeur validé publie une offre, seul un demandeur validé postule, chaque administrateur ne traite que les dossiers de sa catégorie…). Personne ne peut s'inscrire comme administrateur.
+- **Rôles** : chaque action vérifie que tu as le bon rôle et le bon statut (seul un employeur validé publie une offre, seul un demandeur validé postule, chaque administrateur ne traite que les dossiers de sa catégorie, seul le super admin crée des administrateurs…). Personne ne peut s'inscrire comme administrateur.
 - **Session** : déconnexion automatique après 30 minutes sans activité, pour les ordinateurs partagés.
 - **Injections** : tout le texte est « échappé » avant d'être affiché (contre le XSS), et toutes les requêtes SQL utilisent des paramètres `?`.
 - **En-têtes de sécurité** : `vercel.json` ajoute une politique CSP, l'anti-clickjacking et d'autres protections.
@@ -65,8 +75,9 @@ Les tables sont dans `js/db.js` : `users` (avec le rôle et le statut du compte)
 | Employeur en attente | `rh@congobatiment.cd` | `musala123` |
 | Admin des employeurs | `admin.employeurs@musala.cd` | `admin-employeurs` |
 | Admin des demandeurs | `admin.demandeurs@musala.cd` | `admin-demandeurs` |
+| Super admin | `superadmin@musala.cd` | `super-musala` |
 
-> ⚠️ Avant une vraie mise en service, change les mots de passe des administrateurs : ils sont écrits ici pour les tests.
+> ⚠️ Avant une vraie mise en service, change les mots de passe du super admin et des administrateurs (lien « 🔑 Changer mon mot de passe » dans chaque espace) : ils sont écrits ici pour les tests.
 
 Les entreprises, les personnes et tous les numéros d'exemple (RCCM, pièces d'identité, téléphones…) sont inventés.
 
