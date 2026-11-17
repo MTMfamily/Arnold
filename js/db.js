@@ -78,14 +78,15 @@ const DB = {
 
   // Quelques exemples (fictifs) pour que la plateforme ne soit pas vide.
   async remplirExemples() {
-    const mdp = await hacher("musala123");
+    // Chaque compte d'exemple a son propre sel, comme un vrai compte.
+    const mdps = await Promise.all(Array.from({ length: 6 }, () => hacherMotDePasse("musala123")));
     const employeurs = [
       ["Kin Digital", "contact@kindigital.cd", "Kinshasa", "Informatique & Tech", "Agence web et mobile qui aide les entreprises congolaises à passer au numérique."],
       ["Katanga Mining Services", "rh@kms.cd", "Lubumbashi", "Mines", "Services techniques et logistiques pour les sites miniers du Haut-Katanga."],
       ["Kivu Agri Coop", "jobs@kivuagri.cd", "Goma", "Agriculture", "Coopérative qui accompagne les petits producteurs de café et de légumes du Kivu."],
     ];
     for (const [nom, email, ville, secteur, desc] of employeurs) {
-      this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES ('employeur', ?, ?, ?, ?)", [nom, email, mdp, ville]);
+      this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES ('employeur', ?, ?, ?, ?)", [nom, email, mdps.pop(), ville]);
       this.sql.run("INSERT INTO entreprises (user_id, secteur, description) VALUES (last_insert_rowid(), ?, ?)", [secteur, desc]);
     }
 
@@ -107,7 +108,7 @@ const DB = {
       ["Esther Kahindo", "esther@exemple.cd", "Goma", "Agronome", "J'aide les agriculteurs à produire plus et mieux.", "Agronomie, Swahili, Gestion de projet", "Master en agronomie"],
     ];
     for (const [nom, email, ville, titre, bio, comp, etudes] of demandeurs) {
-      this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES ('demandeur', ?, ?, ?, ?)", [nom, email, mdp, ville]);
+      this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES ('demandeur', ?, ?, ?, ?)", [nom, email, mdps.pop(), ville]);
       this.sql.run("INSERT INTO profils (user_id, titre, bio, competences, niveau_etudes) VALUES (last_insert_rowid(), ?, ?, ?, ?)", [titre, bio, comp, etudes]);
     }
   },
@@ -143,12 +144,63 @@ const DB = {
   },
 };
 
-async function hacher(texte) {
-  if (window.crypto && crypto.subtle) {
-    const octets = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("musala:" + texte));
-    return Array.from(new Uint8Array(octets)).map((b) => b.toString(16).padStart(2, "0")).join("");
+// ---------- Mots de passe ----------
+// On ne garde jamais le mot de passe lui-même, seulement une « empreinte ».
+// PBKDF2 est volontairement lent, et chaque compte a son propre sel (aléatoire) :
+// deux comptes avec le même mot de passe n'ont donc pas la même empreinte.
+
+const PBKDF2_ITERATIONS = 210000;
+
+function cryptoDisponible() {
+  if (!(window.crypto && crypto.subtle)) {
+    throw new Error("Musala doit être ouvert en https (ou sur localhost) pour protéger les mots de passe.");
   }
-  return "brut:" + texte;
+}
+
+function enHex(octets) {
+  return Array.from(new Uint8Array(octets)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function depuisHex(texte) {
+  return new Uint8Array(texte.match(/../g).map((h) => parseInt(h, 16)));
+}
+
+async function pbkdf2(motDePasse, sel, iterations) {
+  const cle = await crypto.subtle.importKey("raw", new TextEncoder().encode(motDePasse), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: sel, iterations }, cle, 256);
+  return enHex(bits);
+}
+
+// Renvoie "pbkdf2$iterations$sel$empreinte".
+async function hacherMotDePasse(motDePasse) {
+  cryptoDisponible();
+  const sel = crypto.getRandomValues(new Uint8Array(16));
+  return ["pbkdf2", PBKDF2_ITERATIONS, enHex(sel), await pbkdf2(motDePasse, sel, PBKDF2_ITERATIONS)].join("$");
+}
+
+// Vérifie un mot de passe. Accepte aussi l'ancien format (SHA-256 simple),
+// pour que les comptes déjà créés puissent se connecter et être mis à jour.
+async function verifierMotDePasse(motDePasse, stocke) {
+  cryptoDisponible();
+  const attenduBrut = String(stocke || "");
+  const morceaux = attenduBrut.split("$");
+  let calcule;
+  let attendu;
+  if (morceaux[0] === "pbkdf2" && morceaux.length === 4) {
+    calcule = await pbkdf2(motDePasse, depuisHex(morceaux[2]), Number(morceaux[1]));
+    attendu = morceaux[3];
+  } else {
+    calcule = enHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("musala:" + motDePasse)));
+    attendu = attenduBrut;
+  }
+  // Comparaison qui prend toujours le même temps.
+  let difference = calcule.length ^ attendu.length;
+  for (let i = 0; i < calcule.length; i++) difference |= calcule.charCodeAt(i) ^ attendu.charCodeAt(i);
+  return difference === 0;
+}
+
+function ancienFormat(stocke) {
+  return !String(stocke || "").startsWith("pbkdf2$");
 }
 
 function lireStockage(cle) {

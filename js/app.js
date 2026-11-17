@@ -70,18 +70,62 @@ function donneesForm(form) {
 
 // ---------- Session ----------
 
+// La session expire après 30 minutes sans activité,
+// pour protéger les comptes sur les ordinateurs partagés (cybercafé, école…).
+const SESSION_DUREE = 30 * 60 * 1000;
+
+function lireSession() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SESSION_KEY));
+    return s && Number.isInteger(s.id) && typeof s.expire === "number" ? s : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function ecrireSession(id) {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ id, expire: Date.now() + SESSION_DUREE })); } catch (err) { /* rien */ }
+}
+
+function oublierSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch (err) { /* rien */ }
+}
+
 function utilisateur() {
-  let id = null;
-  try { id = localStorage.getItem(SESSION_KEY); } catch (err) { /* rien */ }
-  return id ? DB.un("SELECT * FROM users WHERE id = ?", [Number(id)]) : null;
+  const s = lireSession();
+  if (!s) {
+    oublierSession();
+    return null;
+  }
+  if (s.expire < Date.now()) {
+    oublierSession();
+    toast("Session expirée : reconnecte-toi.");
+    return null;
+  }
+  return DB.un("SELECT * FROM users WHERE id = ?", [s.id]);
+}
+
+// Chaque action repousse l'expiration de 30 minutes.
+function prolongerSession() {
+  const s = lireSession();
+  if (s && s.expire >= Date.now()) ecrireSession(s.id);
+}
+
+// Renvoie l'utilisateur connecté s'il a le bon rôle, sinon l'envoie se connecter.
+function exiger(role) {
+  const moi = utilisateur();
+  if (moi && moi.role === role) return moi;
+  toast(role === "employeur" ? "Réservé aux employeurs." : "Réservé aux demandeurs d'emploi.");
+  aller("#/connexion");
+  return null;
 }
 
 function connecter(id) {
-  try { localStorage.setItem(SESSION_KEY, String(id)); } catch (err) { /* rien */ }
+  ecrireSession(id);
 }
 
 function deconnecter() {
-  try { localStorage.removeItem(SESSION_KEY); } catch (err) { /* rien */ }
+  oublierSession();
   toast("À bientôt sur Musala !");
   aller("#/");
 }
@@ -294,6 +338,7 @@ const pages = {
         <button class="btn">Se connecter</button>
         <p style="text-align:center">Pas encore de compte ? <a href="#/inscription">Inscris-toi</a></p>
         <div class="astuce">💡 Pour tester : <b>grace@exemple.cd</b> (demandeuse) ou <b>contact@kindigital.cd</b> (employeur), mot de passe <b>musala123</b>.</div>
+        <div class="astuce">🔒 Sur un ordinateur partagé (cybercafé, école), pense à cliquer sur <b>Déconnexion</b> en partant. Par sécurité, Musala te déconnecte aussi après 30 minutes sans activité.</div>
       </form>`;
   },
 
@@ -321,8 +366,8 @@ const pages = {
         </div>
         <label for="email">E-mail</label>
         <input id="email" name="email" type="email" required autocomplete="email">
-        <label for="mdp">Mot de passe (6 caractères minimum)</label>
-        <input id="mdp" name="mdp" type="password" minlength="6" required autocomplete="new-password">
+        <label for="mdp">Mot de passe (8 caractères minimum)</label>
+        <input id="mdp" name="mdp" type="password" minlength="8" required autocomplete="new-password">
         <button class="btn btn-rouge">Créer mon compte</button>
         <p style="text-align:center">Déjà inscrit ? <a href="#/connexion">Connecte-toi</a></p>
       </form>`;
@@ -470,10 +515,14 @@ const formulaires = {
 
   async connexion(form) {
     const d = donneesForm(form);
-    const u = DB.un("SELECT * FROM users WHERE lower(email) = lower(?)", [d.email.trim()]);
-    if (!u || u.mot_de_passe !== await hacher(d.mdp)) {
+    const u = DB.un("SELECT * FROM users WHERE lower(email) = lower(?)", [String(d.email || "").trim()]);
+    if (!u || !await verifierMotDePasse(String(d.mdp || ""), u.mot_de_passe)) {
       toast("E-mail ou mot de passe incorrect.");
       return;
+    }
+    // Un compte créé avant la mise à jour passe au nouveau format, plus sûr.
+    if (ancienFormat(u.mot_de_passe)) {
+      DB.executer("UPDATE users SET mot_de_passe = ? WHERE id = ?", [await hacherMotDePasse(d.mdp), u.id]);
     }
     connecter(u.id);
     toast(`Bienvenue ${u.nom.split(" ")[0]} !`);
@@ -483,12 +532,20 @@ const formulaires = {
 
   async inscription(form) {
     const d = donneesForm(form);
-    if (DB.un("SELECT id FROM users WHERE lower(email) = lower(?)", [d.email.trim()])) {
+    const nom = String(d.nom || "").trim();
+    const email = String(d.email || "").trim();
+    const mdp = String(d.mdp || "");
+    // Les règles sont vérifiées ici aussi : le formulaire seul peut être contourné.
+    if (!["demandeur", "employeur"].includes(d.role)) return toast("Choisis demandeur ou employeur.");
+    if (!nom || nom.length > 100) return toast("Indique un nom (100 caractères maximum).");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast("Cet e-mail n'est pas valide.");
+    if (mdp.length < 8) return toast("Le mot de passe doit faire au moins 8 caractères.");
+    if (DB.un("SELECT id FROM users WHERE lower(email) = lower(?)", [email])) {
       toast("Cet e-mail a déjà un compte. Connecte-toi !");
       return;
     }
     const id = DB.executer("INSERT INTO users (role, nom, email, mot_de_passe, ville, telephone) VALUES (?, ?, ?, ?, ?, ?)",
-      [d.role, d.nom.trim(), d.email.trim(), await hacher(d.mdp), d.ville, d.telephone]);
+      [d.role, nom, email, await hacherMotDePasse(mdp), d.ville || "", d.telephone || ""]);
     if (d.role === "employeur") DB.executer("INSERT INTO entreprises (user_id) VALUES (?)", [id]);
     else DB.executer("INSERT INTO profils (user_id) VALUES (?)", [id]);
     connecter(id);
@@ -497,8 +554,10 @@ const formulaires = {
   },
 
   postuler(form) {
-    const moi = utilisateur();
-    if (!moi) return aller("#/connexion");
+    const moi = exiger("demandeur");
+    if (!moi) return;
+    const offre = DB.un("SELECT id FROM offres WHERE id = ? AND active = 1", [Number(form.dataset.offre)]);
+    if (!offre) return toast("Cette offre n'est plus disponible.");
     DB.executer("INSERT OR IGNORE INTO candidatures (offre_id, demandeur_id, message) VALUES (?, ?, ?)",
       [Number(form.dataset.offre), moi.id, donneesForm(form).message]);
     toast("Candidature envoyée ! Bonne chance 🍀");
@@ -506,7 +565,8 @@ const formulaires = {
   },
 
   profil(form) {
-    const moi = utilisateur();
+    const moi = exiger("demandeur");
+    if (!moi) return;
     const d = donneesForm(form);
     DB.executer("UPDATE users SET ville = ?, telephone = ? WHERE id = ?", [d.ville, d.telephone, moi.id]);
     DB.executer(`INSERT INTO profils (user_id, titre, bio, competences, experience, niveau_etudes, disponible)
@@ -518,7 +578,8 @@ const formulaires = {
   },
 
   entreprise(form) {
-    const moi = utilisateur();
+    const moi = exiger("employeur");
+    if (!moi) return;
     const d = donneesForm(form);
     DB.executer("UPDATE users SET ville = ?, telephone = ? WHERE id = ?", [d.ville, d.telephone, moi.id]);
     DB.executer(`INSERT INTO entreprises (user_id, secteur, description, site) VALUES (?, ?, ?, ?)
@@ -528,11 +589,15 @@ const formulaires = {
   },
 
   offre(form) {
-    const moi = utilisateur();
+    const moi = exiger("employeur");
+    if (!moi) return;
     const d = donneesForm(form);
+    const titre = String(d.titre || "").trim();
+    const description = String(d.description || "").trim();
+    if (!titre || !description) return toast("Le titre et la description sont obligatoires.");
     const id = DB.executer(`INSERT INTO offres (employeur_id, titre, secteur, ville, type_contrat, salaire, description, competences)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [moi.id, d.titre, d.secteur, d.ville, d.type_contrat, d.salaire, d.description, d.competences]);
+      [moi.id, titre, d.secteur || "", d.ville || "", d.type_contrat || "", d.salaire || "", description, d.competences || ""]);
     toast("Offre publiée 🚀");
     aller("#/offre/" + id);
   },
@@ -542,16 +607,24 @@ document.addEventListener("submit", (ev) => {
   const nom = ev.target.dataset.form;
   if (nom && formulaires[nom]) {
     ev.preventDefault();
-    formulaires[nom](ev.target);
+    prolongerSession();
+    Promise.resolve()
+      .then(() => formulaires[nom](ev.target))
+      .catch((err) => {
+        console.error(err);
+        toast(err.message && err.message.startsWith("Musala") ? err.message : "Oups, une erreur est survenue.");
+      });
   }
 });
 
 document.addEventListener("click", (ev) => {
+  prolongerSession();
   const cible = ev.target.closest("[data-action], [data-basculer]");
   if (!cible) return;
   if (cible.dataset.action === "deconnexion") deconnecter();
   if (cible.dataset.basculer) {
-    const moi = utilisateur();
+    const moi = exiger("employeur");
+    if (!moi) return;
     DB.executer("UPDATE offres SET active = 1 - active WHERE id = ? AND employeur_id = ?", [Number(cible.dataset.basculer), moi.id]);
     afficher();
   }
@@ -560,7 +633,9 @@ document.addEventListener("click", (ev) => {
 document.addEventListener("change", (ev) => {
   const id = ev.target.dataset.statut;
   if (!id) return;
-  const moi = utilisateur();
+  const moi = exiger("employeur");
+  if (!moi || !Object.hasOwn(STATUTS, ev.target.value)) return;
+  prolongerSession();
   DB.executer(`UPDATE candidatures SET statut = ? WHERE id = ?
     AND offre_id IN (SELECT id FROM offres WHERE employeur_id = ?)`, [ev.target.value, Number(id), moi.id]);
   toast("Statut mis à jour");
