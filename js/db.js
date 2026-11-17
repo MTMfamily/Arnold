@@ -2,13 +2,19 @@
 // On utilise SQLite (via sql.js) directement dans le navigateur,
 // et on sauvegarde la base dans le stockage local (localStorage).
 
-const DB_KEY = "musala_db_v1";
+// v2 : ajout de l'administrateur et de la validation des employeurs.
+// Les bases de test v1 sont remplacées par une nouvelle base d'exemple.
+const DB_KEY = "musala_db_v2";
+const ANCIENNES_CLES = ["musala_db_v1"];
 
 const DB = {
   sql: null,
 
   async init() {
     const SQL = await initSqlJs({ locateFile: (f) => "vendor/" + f });
+    for (const cle of ANCIENNES_CLES) {
+      try { localStorage.removeItem(cle); } catch (e) { /* rien */ }
+    }
     const sauvegarde = lireStockage(DB_KEY);
     if (sauvegarde) {
       try {
@@ -28,12 +34,15 @@ const DB = {
     this.sql.run(`
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        role TEXT NOT NULL CHECK (role IN ('demandeur', 'employeur')),
+        role TEXT NOT NULL CHECK (role IN ('demandeur', 'employeur', 'admin')),
         nom TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         mot_de_passe TEXT NOT NULL,
         ville TEXT,
         telephone TEXT,
+        -- Demandeurs et admin : 'actif'. Employeurs : 'en_attente', 'valide', 'refuse' ou 'suspendu'.
+        statut_compte TEXT NOT NULL DEFAULT 'actif'
+          CHECK (statut_compte IN ('actif', 'en_attente', 'valide', 'refuse', 'suspendu')),
         cree_le TEXT DEFAULT (datetime('now'))
       );
       CREATE TABLE profils (
@@ -49,7 +58,19 @@ const DB = {
         user_id INTEGER PRIMARY KEY REFERENCES users(id),
         secteur TEXT,
         description TEXT,
-        site TEXT
+        site TEXT,
+        -- Dossier de vérification, contrôlé par l'administrateur.
+        rccm TEXT,
+        id_nat TEXT,
+        nif TEXT,
+        adresse TEXT,
+        responsable TEXT,
+        fonction_responsable TEXT,
+        dossier_envoye_le TEXT,
+        -- Décision de l'administrateur.
+        motif TEXT,
+        decide_le TEXT,
+        decide_par INTEGER REFERENCES users(id)
       );
       CREATE TABLE offres (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,16 +100,24 @@ const DB = {
   // Quelques exemples (fictifs) pour que la plateforme ne soit pas vide.
   async remplirExemples() {
     // Chaque compte d'exemple a son propre sel, comme un vrai compte.
-    const mdps = await Promise.all(Array.from({ length: 6 }, () => hacherMotDePasse("musala123")));
+    const mdps = await Promise.all(Array.from({ length: 7 }, () => hacherMotDePasse("musala123")));
+
+    // Employeurs : numéros RCCM, Id. Nat. et NIF inventés.
     const employeurs = [
-      ["Kin Digital", "contact@kindigital.cd", "Kinshasa", "Informatique & Tech", "Agence web et mobile qui aide les entreprises congolaises à passer au numérique."],
-      ["Katanga Mining Services", "rh@kms.cd", "Lubumbashi", "Mines", "Services techniques et logistiques pour les sites miniers du Haut-Katanga."],
-      ["Kivu Agri Coop", "jobs@kivuagri.cd", "Goma", "Agriculture", "Coopérative qui accompagne les petits producteurs de café et de légumes du Kivu."],
+      ["Kin Digital", "contact@kindigital.cd", "Kinshasa", "+243 810 000 001", "Informatique & Tech", "Agence web et mobile qui aide les entreprises congolaises à passer au numérique.",
+        "CD/KIN/RCCM/21-B-00001", "01-0000-N00001A", "A0000001B", "12, avenue Exemple, Gombe, Kinshasa", "Joël Exemple", "Directeur général", "valide"],
+      ["Katanga Mining Services", "rh@kms.cd", "Lubumbashi", "+243 990 000 002", "Mines", "Services techniques et logistiques pour les sites miniers du Haut-Katanga.",
+        "CD/LSH/RCCM/19-B-00002", "06-0000-N00002B", "A0000002C", "4, avenue Exemple, Lubumbashi", "Sarah Exemple", "Responsable RH", "valide"],
+      ["Kivu Agri Coop", "jobs@kivuagri.cd", "Goma", "+243 970 000 003", "Agriculture", "Coopérative qui accompagne les petits producteurs de café et de légumes du Kivu.",
+        "CD/GOM/RCCM/20-B-00003", "09-0000-N00003C", "A0000003D", "7, avenue Exemple, Goma", "Didier Exemple", "Coordinateur", "valide"],
     ];
-    for (const [nom, email, ville, secteur, desc] of employeurs) {
-      this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES ('employeur', ?, ?, ?, ?)", [nom, email, mdps.pop(), ville]);
-      this.sql.run("INSERT INTO entreprises (user_id, secteur, description) VALUES (last_insert_rowid(), ?, ?)", [secteur, desc]);
-    }
+    const ajouterEmployeur = ([nom, email, ville, tel, secteur, desc, rccm, idNat, nif, adresse, resp, fonction, statut]) => {
+      this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville, telephone, statut_compte) VALUES ('employeur', ?, ?, ?, ?, ?, ?)",
+        [nom, email, mdps.pop(), ville, tel, statut]);
+      this.sql.run(`INSERT INTO entreprises (user_id, secteur, description, rccm, id_nat, nif, adresse, responsable, fonction_responsable, dossier_envoye_le)
+        VALUES (last_insert_rowid(), ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`, [secteur, desc, rccm, idNat, nif, adresse, resp, fonction]);
+    };
+    employeurs.forEach(ajouterEmployeur);
 
     const offres = [
       [1, "Développeur web junior", "Informatique & Tech", "Kinshasa", "CDI", "800 $ / mois", "Rejoins notre équipe pour créer des sites et applications pour nos clients.\n\nTu travailleras avec HTML, CSS, JavaScript et tu seras accompagné par un développeur senior.", "HTML, CSS, JavaScript"],
@@ -111,6 +140,14 @@ const DB = {
       this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES ('demandeur', ?, ?, ?, ?)", [nom, email, mdps.pop(), ville]);
       this.sql.run("INSERT INTO profils (user_id, titre, bio, competences, niveau_etudes) VALUES (last_insert_rowid(), ?, ?, ?, ?)", [titre, bio, comp, etudes]);
     }
+
+    // Un employeur qui attend la validation, pour tester l'espace administrateur.
+    ajouterEmployeur(["Congo Bâtiment Plus", "rh@congobatiment.cd", "Kinshasa", "+243 820 000 004", "BTP", "Entreprise de construction de maisons et de petits immeubles.",
+      "CD/KIN/RCCM/23-B-00004", "01-0000-N00004D", "A0000004E", "33, avenue Exemple, Limete, Kinshasa", "Paul Exemple", "Gérant", "en_attente"]);
+
+    // L'administrateur de Musala.
+    this.sql.run("INSERT INTO users (role, nom, email, mot_de_passe, ville) VALUES ('admin', 'Administrateur Musala', 'admin@musala.cd', ?, 'Kinshasa')",
+      [await hacherMotDePasse("admin-musala")]);
   },
 
   // Lire des lignes : renvoie une liste d'objets.

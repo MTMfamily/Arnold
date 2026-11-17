@@ -167,7 +167,9 @@ textarea { min-height: 110px; resize: vertical; }
   margin: 0; padding: 16px; border: 2px solid var(--bord); border-radius: 14px;
   cursor: pointer; text-align: center; font-weight: 700;
 }
-.choix-role input { display: none; }
+.choix-role { position: relative; }
+.choix-role input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.choix-role label:has(input:focus-visible) { outline: 3px solid var(--rouge); outline-offset: 2px; }
 .choix-role input:checked + span { color: var(--bleu); }
 .choix-role label:has(input:checked) { border-color: var(--bleu); background: var(--bleu-clair); }
 .choix-role small { display: block; font-weight: 400; color: var(--gris); }
@@ -206,3 +208,35 @@ th { color: var(--gris); font-weight: 600; }
 
 .footer { margin-top: 60px; padding: 28px 0; background: var(--bleu); color: var(--blanc); text-align: center; border-top: 6px solid var(--rouge); }
 .footer small { opacity: .8; }
+
+/* ---------- Validation des employeurs ---------- */
+.bandeau { padding: 14px 18px; border-radius: 14px; margin: 12px 0 8px; font-size: 15px; }
+.bandeau-en_attente { background: #fff4d6; color: #7a5200; border-left: 5px solid #f0b400; }
+.bandeau-refuse, .bandeau-suspendu { background: var(--rouge-clair); color: #8a0d26; border-left: 5px solid var(--rouge); }
+
+.statut-compte-en_attente { background: #fff4d6; color: #a06b00; }
+.statut-compte-valide { background: #ddf7e6; color: #137a3a; }
+.statut-compte-refuse, .statut-compte-suspendu { background: var(--rouge-clair); color: var(--rouge); }
+.page-titre h1 .statut { vertical-align: middle; font-size: 13px; }
+
+.verifie { background: #ddf7e6; color: #137a3a; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.pastille { background: var(--rouge); color: var(--blanc); font-size: 12px; font-weight: 800; padding: 1px 7px; border-radius: 999px; }
+
+.criteres { margin: 8px 0 0; padding-left: 20px; }
+.criteres li { margin: 2px 0; }
+
+.fiche { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 14px 0; font-size: 14px; }
+.fiche dt { color: var(--gris); font-weight: 600; }
+.fiche dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .fiche { grid-template-columns: 1fr; gap: 0; } .fiche dd { margin-bottom: 8px; } }
+
+.onglets { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0; }
+.onglet { padding: 8px 14px; border-radius: 999px; background: var(--blanc); border: 2px solid var(--bord); color: var(--texte); font-weight: 600; font-size: 14px; }
+.onglet:hover { text-decoration: none; border-color: var(--bleu); }
+.onglet.actif { background: var(--bleu); border-color: var(--bleu); color: var(--blanc); }
+.liste-dossiers { display: grid; gap: 16px; }
+.dossier h3 { margin: 0; }
+label.coche { display: flex; gap: 8px; align-items: center; font-weight: 400; margin: 6px 0; }
+label.coche input { width: auto; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+fieldset:disabled input, fieldset:disabled select, fieldset:disabled textarea { background: var(--fond); color: var(--gris); }
